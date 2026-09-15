@@ -20,11 +20,16 @@ class LoggSettings:
 class TBank:
     token: str 
 
+@dataclass
+class Security:
+    token: str 
+
 @dataclass 
 class Config:
     bot: BotSettings
     log: LoggSettings
     tbank: TBank
+    sec: Security
 
 def load_config(path: str | None = None) -> Config:
     
@@ -54,6 +59,8 @@ def load_config(path: str | None = None) -> Config:
 
     tbank_token = env("T_BANK_READ_ONLY_INVEST_TOKEN")
 
+    sec_token = env("ENCRYPTION_KEY")
+
     logg_settings = LoggSettings(
         level=env("LOG_LEVEL", default="INFO"),
         format=env("LOG_FORMAT", default="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -64,5 +71,6 @@ def load_config(path: str | None = None) -> Config:
     return Config(
         bot=BotSettings(token=token, admin_ids=admin_ids),
         log=logg_settings,
-        tbank=TBank(token=tbank_token)
+        tbank=TBank(token=tbank_token),
+        sec=Security(token=sec_token),
     )
