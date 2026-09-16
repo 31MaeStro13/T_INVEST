@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "celery>=5.6.3",
     "cryptography>=50.0.1",
     "django>=6.1.1",
     "djangorestframework>=3.18.1",
     "environs>=15.2.0",
     "python-dotenv>=1.2.3",
+    "redis>=8.1.0",
     "t-tech-investments>=1.49.3",
 ]
 
