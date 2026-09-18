@@ -18,7 +18,7 @@ django.setup()
 from asgiref.sync import sync_to_async
 from users.models import InvestorUser
 from portfolio.models import Account
-from portfolio.services import save_portfolio_snaphot
+from portfolio.services import save_portfolio_snapshot
 
 
 logger = logging.getLogger(__name__)

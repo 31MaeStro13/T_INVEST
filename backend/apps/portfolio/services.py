@@ -2,25 +2,21 @@ from decimal import Decimal
 from django.db import transaction
 
 from .models import Account, PortfolioSnapshot, Position
+from t_tech.invest.utils import money_to_decimal, quotation_to_decimal
 
 
-def decimal_confert(money) -> Decimal:
-    if not money: 
-        return Decimal("0")
-    return Decimal(money.units) + Decimal(money.nano) / Decimal(10**9)
-            
 
-def save_portfolio_snaphot(account: Account, portfolio_data) -> PortfolioSnapshot:
+def save_portfolio_snapshot(account: Account, portfolio_data) -> PortfolioSnapshot:
 
     with transaction.atomic():
         portfoliosnapshot = PortfolioSnapshot.objects.create(
             account=account,
-            total_amount_portfolio=decimal_confert(portfolio_data.total_amount_portfolio),
-            total_amount_shares=decimal_confert(portfolio_data.total_amount_shares),
-            total_amount_bonds=decimal_confert(portfolio_data.total_amount_bonds),
-            total_amount_etf=decimal_confert(portfolio_data.total_amount_etf),
-            total_amount_currencies=decimal_confert(portfolio_data.total_amount_currencies),
-            expected_yield=decimal_confert(portfolio_data.expected_yield),
+            total_amount_portfolio=money_to_decimal(portfolio_data.total_amount_portfolio),
+            total_amount_shares=money_to_decimal(portfolio_data.total_amount_shares),
+            total_amount_bonds=money_to_decimal(portfolio_data.total_amount_bonds),
+            total_amount_etf=money_to_decimal(portfolio_data.total_amount_etf),
+            total_amount_currencies=money_to_decimal(portfolio_data.total_amount_currencies),
+            expected_yield=quotation_to_decimal(portfolio_data.expected_yield) if portfolio_data.expected_yield else Decimal("0"),
 
         )
         position_to_create = []
@@ -33,10 +29,10 @@ def save_portfolio_snaphot(account: Account, portfolio_data) -> PortfolioSnapsho
                 #ticker=pos.ticker,
                 #name=pos.name,
                 instrument_type=pos.instrument_type,
-                quantity=decimal_confert(pos.quantity),
-                current_price=decimal_confert(pos.current_price),
-                average_position_price=decimal_confert(pos.average_position_price),
-                expected_yield=decimal_confert(pos.expected_yield),
+                quantity=quotation_to_decimal(pos.quantity),
+                current_price=money_to_decimal(pos.current_price),
+                average_position_price=money_to_decimal(pos.average_position_price),
+                expected_yield=quotation_to_decimal(pos.expected_yield) if pos.expected_yield else Decimal("0"),
             )
         )
 

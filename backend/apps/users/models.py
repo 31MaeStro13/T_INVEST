@@ -19,9 +19,9 @@ class InvestorUser(models.Model):
     # не я написал функции
     def set_token(self, raw_token: str) -> None:
 
-        chiper = self._get_cipher()
+        cipher = self._get_cipher()
 
-        encrypted_bytes = chiper.encrypt(raw_token.encode("utf-8"))
+        encrypted_bytes = cipher.encrypt(raw_token.encode("utf-8"))
 
         self.encrypted_token = encrypted_bytes.decode("utf-8")
     
