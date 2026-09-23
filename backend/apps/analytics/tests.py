@@ -90,3 +90,27 @@ class AnalyticsEngineTestCase(unittest.TestCase):
         self.assertIn("sector_allocation", data)
         self.assertIn("concentration_risk", data)
         self.assertTrue(data["has_sufficient_data"])
+
+    def test_compute_batch_metrics_equivalence(self):
+        """Проверка численной эквивалентности 2D матричного батчинга и 1D ядра."""
+        import numpy as np
+        from .batch import compute_batch_metrics
+
+        p1 = [100.0, 105.0, 95.0, 102.0]
+        p2 = [200.0, 210.0, 190.0, 204.0]
+        matrix = np.array([p1, p2])
+
+        batch_res = compute_batch_metrics(matrix, risk_free_rate=0.19)
+
+        # Проверяем для портфеля 1
+        vol_1d = round(annual_volatility(p1) * 100, 2)
+        mdd_1d = round(max_drawdown(p1) * 100, 2)
+        sharpe_1d = round(sharpe_ratio(p1, 0.19), 3)
+
+        self.assertEqual(batch_res["annual_volatilities"][0], vol_1d)
+        self.assertEqual(batch_res["max_drawdowns"][0], mdd_1d)
+        self.assertEqual(batch_res["sharpe_ratios"][0], sharpe_1d)
+
+        # Проверяем размерность результата
+        self.assertEqual(len(batch_res["annual_volatilities"]), 2)
+
