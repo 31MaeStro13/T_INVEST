@@ -32,9 +32,7 @@ async def process_token_button(
     if tokens:
         kb = get_tokens_keyboard(tokens)
         await message.answer(
-            text="🔑 <b>Управление токенами Т-Банка</b>\n\n"
-                 "Ниже представлены ваши привязанные токены. "
-                 "Вы можете переключаться между ними в один клик или добавить новый:",
+            text=LEXICON_RU["tokens_menu_first"],
             reply_markup=kb,
             parse_mode="HTML",
         )
@@ -65,7 +63,7 @@ async def process_token_cancel_callback(callback: CallbackQuery, state: FSMConte
     await state.clear()
     await callback.answer("Ввод токена отменен")
     await callback.message.edit_text(
-        "❌ <b>Ввод токена отменен.</b>\nВы можете продолжать работу через главное меню.",
+        text=LEXICON_RU["token_input_canceled"],
         parse_mode="HTML",
     )
 
@@ -81,7 +79,7 @@ async def process_token_input(
     if text in MAIN_MENU_BUTTONS or text in {"/cancel", "/start"}:
         await state.clear()
         if text == "/cancel":
-            await message.answer("❌ <b>Ввод токена отменен.</b>", parse_mode="HTML")
+            await message.answer(LEXICON_RU["token_input_canceled"], parse_mode="HTML")
             return
         await message.answer(
             f"ℹ️ Ввод токена сброшен. Переключаю на <b>{text}</b>...",
@@ -126,9 +124,7 @@ async def process_token_input(
     await state.set_state(TokenState.waiting_for_name)
 
     await message.answer(
-        "🏷 <b>Как назвать этот портфель?</b>\n\n"
-        "Отправьте понятное имя (например: <i>«Личный»</i>, <i>«Портфель Олега»</i>, <i>«Инвест-клуб»</i>):\n"
-        "<i>(Или отправьте точку <code>.</code>, чтобы использовать стандартное имя)</i>",
+        text=LEXICON_RU["token_name_prompt"],
         reply_markup=get_cancel_token_keyboard(),
         parse_mode="HTML",
     )
@@ -143,7 +139,7 @@ async def process_token_name_input(
 
     if text in MAIN_MENU_BUTTONS or text in {"/cancel", "/start"}:
         await state.clear()
-        await message.answer("❌ <b>Привязка токена отменена.</b>", parse_mode="HTML")
+        await message.answer(LEXICON_RU["token_input_canceled"], parse_mode="HTML")
         return
 
     name = "Основной портфель" if text == "." or not text else text[:48]
@@ -171,9 +167,7 @@ async def process_token_name_input(
 
     if success:
         await wait_msg.edit_text(
-            f"✅ <b>Портфель «{name}» успешно привязан!</b>\n\n"
-            "Синхронизация счетов запущена в фоне. Через несколько секунд нажмите "
-            "<b>«💼 Мой портфель»</b> или <b>«📑 Счета»</b>.",
+            text=LEXICON_RU["token_saved_with_name"].format(name=name),
             parse_mode="HTML",
         )
     else:

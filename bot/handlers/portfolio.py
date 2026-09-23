@@ -110,7 +110,7 @@ async def process_accounts_button(message: Message, api_client: BackendAPIClient
     is_consolidated = bool(status and status.get("active_account_id") is None)
     kb = get_accounts_keyboard(accounts, is_consolidated_active=is_consolidated)
     await message.answer(
-        text="📑 <b>Выберите брокерский счет для просмотра портфеля:</b>",
+        text=LEXICON_RU["choose_account"],
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -120,7 +120,7 @@ async def process_accounts_button(message: Message, api_client: BackendAPIClient
 async def process_sync_button(message: Message, api_client: BackendAPIClient):
     """Запуск синхронизации с серверами Т-Банка."""
     wait_msg = await message.answer(
-        "⏳ <i>Запрашиваю свежие котировки и балансы в Т-Банке...</i>",
+        LEXICON_RU["sync_in_progress"],
         parse_mode="HTML",
     )
     success = await api_client.trigger_sync(telegram_id=message.from_user.id)
@@ -139,13 +139,13 @@ async def process_sync_button(message: Message, api_client: BackendAPIClient):
         positions_count = len(snapshot.get("positions", []))
         kb = get_portfolio_keyboard(account_id=account["id"], positions_count=positions_count)
         await wait_msg.edit_text(
-            text=f"✅ <b>Данные успешно обновлены!</b>\n\n{text}",
+            text=f"{LEXICON_RU['sync_success']}\n\n{text}",
             reply_markup=kb,
             parse_mode="HTML",
         )
     else:
         await wait_msg.edit_text(
-            text="✅ <b>Синхронизация поставлена в очередь!</b> Нажмите «💼 Мой портфель» через пару секунд.",
+            text=LEXICON_RU["sync_queued"],
             parse_mode="HTML",
         )
 
@@ -181,7 +181,7 @@ async def cb_view_portfolio(callback: CallbackQuery, api_client: BackendAPIClien
 async def cb_refresh_portfolio(callback: CallbackQuery, api_client: BackendAPIClient):
     """Инлайн-обновление портфеля на лету без отправки новых сообщений."""
     acc_id_raw = callback.data.split(":")[2]
-    await callback.answer("🔄 Запрашиваю свежие котировки...", show_alert=False)
+    await callback.answer(LEXICON_RU["sync_toast"], show_alert=False)
 
     await api_client.trigger_sync(telegram_id=callback.from_user.id)
     await asyncio.sleep(2.0)
@@ -228,14 +228,14 @@ async def cb_accounts_portfolio(callback: CallbackQuery, api_client: BackendAPIC
     """Инлайн-переключение счета."""
     accounts = await api_client.get_accounts(telegram_id=callback.from_user.id)
     if not accounts:
-        await callback.answer("Счета не найдены", show_alert=True)
+        await callback.answer(LEXICON_RU["no_accounts_found"], show_alert=True)
         return
 
     status = await api_client.check_user_status(telegram_id=callback.from_user.id)
     is_consolidated = bool(status and status.get("active_account_id") is None)
     kb = get_accounts_keyboard(accounts, is_consolidated_active=is_consolidated)
     await callback.message.edit_text(
-        text="📑 <b>Выберите брокерский счет для просмотра:</b>",
+        text=LEXICON_RU["choose_account"],
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -247,7 +247,7 @@ async def cb_audit_portfolio(callback: CallbackQuery, api_client: BackendAPIClie
     """Экспресс-аудит риска и диверсификации на основе данных NumPy-движка."""
     acc_id_raw = callback.data.split(":")[2]
 
-    await callback.answer("⏳ Провожу математический аудит...")
+    await callback.answer(LEXICON_RU["audit_in_progress"])
 
     if acc_id_raw == "consolidated":
         data = await api_client.get_consolidated_analytics(telegram_id=callback.from_user.id)
@@ -277,12 +277,7 @@ async def cb_tokens_menu(callback: CallbackQuery, api_client: BackendAPIClient):
         return
 
     kb = get_tokens_keyboard(tokens)
-    text = (
-        "🔑 <b>Управление токенами Т-Банка</b>\n\n"
-        "Ниже представлены ваши привязанные токены. "
-        "Нажмите на токен, чтобы сделать его активным:"
-    )
-    await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(text=LEXICON_RU["tokens_menu_title"], reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 
@@ -290,7 +285,7 @@ async def cb_tokens_menu(callback: CallbackQuery, api_client: BackendAPIClient):
 async def cb_select_token(callback: CallbackQuery, api_client: BackendAPIClient):
     """Переключение активного токена."""
     token_id = int(callback.data.split(":")[2])
-    await callback.answer("🔄 Переключаю активный портфель...", show_alert=False)
+    await callback.answer(LEXICON_RU["token_switch_toast"], show_alert=False)
 
     ok = await api_client.activate_token(telegram_id=callback.from_user.id, token_id=token_id)
     if not ok:
@@ -303,7 +298,7 @@ async def cb_select_token(callback: CallbackQuery, api_client: BackendAPIClient)
     is_consolidated = bool(status and status.get("active_account_id") is None)
     kb = get_accounts_keyboard(accounts or [], is_consolidated_active=is_consolidated)
     await callback.message.edit_text(
-        text="✅ <b>Активный токен переключен!</b>\n\nВыберите брокерский счет для просмотра:",
+        text=LEXICON_RU["token_switch_success"],
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -312,7 +307,7 @@ async def cb_select_token(callback: CallbackQuery, api_client: BackendAPIClient)
 @router.callback_query(F.data.startswith("token:active:"))
 async def cb_active_token(callback: CallbackQuery):
     """Тост при клике на уже активный токен."""
-    await callback.answer("✅ Этот токен уже выбран как активный.", show_alert=False)
+    await callback.answer(LEXICON_RU["token_already_active"], show_alert=False)
 
 
 @router.callback_query(F.data == "noop")
