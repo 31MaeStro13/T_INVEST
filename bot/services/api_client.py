@@ -46,6 +46,52 @@ class BackendAPIClient:
             logger.error(f"Сбой подключения к бэкенду (get_latest_snapshot): {exc}")
             return None
 
+    async def get_consolidated_snapshot(self, telegram_id: int) -> dict[str, Any] | None:
+        """Получает агрегированный снимок портфеля по всем счетам пользователя."""
+        url = f"{self.base_url}/api/v1/accounts/consolidated_snapshot/"
+        params = {"telegram_id": telegram_id}
+        try:
+            async with self.session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                logger.warning(f"Ошибка получения сводного снимка (status {response.status})")
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (get_consolidated_snapshot): {exc}")
+            return None
+
+    async def get_analytics(self, account_id: int) -> dict | None:
+        url = f"{self.base_url}/api/v1/analytics/{account_id}/"
+        try:
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (get_analytics): {exc}")
+            return None
+
+    async def get_consolidated_analytics(self, telegram_id: int) -> dict | None:
+        """Получает консолидированную аналитику и риск-аудит по всем счетам."""
+        url = f"{self.base_url}/api/v1/analytics/consolidated/"
+        params = {"telegram_id": telegram_id}
+        try:
+            async with self.session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (get_consolidated_analytics): {exc}")
+            return None
+
+
+
     async def check_user_status(self, telegram_id: int) -> dict[str, Any] | None:
         """Проверяет статус пользователя (зарегистрирован ли, привязан ли токен)."""
         url = f"{self.base_url}/api/v1/users/status/"
@@ -61,21 +107,69 @@ class BackendAPIClient:
             logger.error(f"Сбой подключения к бэкенду (check_user_status): {exc}")
             return None
 
-    async def set_user_token(self, telegram_id: int, raw_token: str) -> bool:
+    async def get_tokens(self, telegram_id: int) -> list[dict[str, Any]] | None:
+        """Получает список всех токенов пользователя."""
+        url = f"{self.base_url}/api/v1/tokens/"
+        params = {"telegram_id": telegram_id}
+        try:
+            async with self.session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (get_tokens): {exc}")
+            return None
+
+    async def set_user_token(self, telegram_id: int, raw_token: str, name: str = "Основной портфель") -> bool:
         """Отправляет токен Т-Банка на бэкенд для шифрования и сохранения."""
         url = f"{self.base_url}/api/v1/users/token/"
-        payload = {"telegram_id": telegram_id, "token": raw_token}
+        payload = {"telegram_id": telegram_id, "token": raw_token, "name": name}
         try:
             async with self.session.post(
                 url, json=payload, timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 if response.status == 200:
-                    logger.info(f"Токен для telegram_id={telegram_id} успешно сохранен на бэкенде.")
+                    logger.info(f"Токен '{name}' для telegram_id={telegram_id} успешно сохранен.")
                     return True
                 logger.warning(f"Ошибка сохранения токена: status {response.status}")
                 return False
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.error(f"Сбой подключения к бэкенду (set_user_token): {exc}")
+            return False
+
+    async def activate_token(self, telegram_id: int, token_id: int) -> bool:
+        """Активирует выбранный токен пользователя."""
+        url = f"{self.base_url}/api/v1/tokens/{token_id}/activate/"
+        payload = {"telegram_id": telegram_id}
+        try:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                return response.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (activate_token): {exc}")
+            return False
+
+    async def activate_account(self, telegram_id: int, account_id: int | str) -> bool:
+        """Делает брокерский счет (или режим 'Все счета') активным."""
+        try:
+            if str(account_id).lower() in ("consolidated", "all", "none", "0"):
+                url = f"{self.base_url}/api/v1/accounts/activate_consolidated/"
+                payload = {"telegram_id": telegram_id}
+                async with self.session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    return response.status == 200
+            else:
+                url = f"{self.base_url}/api/v1/accounts/{account_id}/activate/"
+                async with self.session.post(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    return response.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (activate_account): {exc}")
             return False
 
     async def trigger_sync(self, telegram_id: int) -> bool:

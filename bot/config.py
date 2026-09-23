@@ -25,7 +25,8 @@ def load_bot_config(path: str | None = None) -> BotConfig:
     raw_ids = env.list("ADMIN_IDS", default=[])
     admin_ids = [int(x) for x in raw_ids if str(x).isdigit()]
     backend_url = env("BACKEND_URL", default="http://127.0.0.1:8000")
-    telegram_proxy = env("TELEGRAM_PROXY", default=None)
+    raw_proxy = env("TELEGRAM_PROXY", default=None)
+    telegram_proxy = raw_proxy.strip() if raw_proxy and raw_proxy.strip() else None
 
     return BotConfig(
         token=token,

@@ -16,6 +16,7 @@ dependencies = [
     "django>=6.1.1",
     "djangorestframework>=3.18.1",
     "environs>=15.2.0",
+    "numpy>=2.5.3",
     "python-dotenv>=1.2.3",
     "redis>=8.1.0",
     "t-tech-investments>=1.49.3",

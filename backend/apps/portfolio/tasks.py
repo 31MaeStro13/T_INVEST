@@ -30,43 +30,60 @@ def sync_user_portfolio(self, user_id: int):
         logger.warning(f"Пользователь #{user_id} не найден в базе данных.")
         return
 
-    token = user.decrypted_token
-    if not token:
-        logger.warning(f"У пользователя #{user_id} отсутствует токен Т-Банка.")
+    # Получаем активные токены пользователя
+    tokens_to_sync = list(user.broker_tokens.filter(is_active=True))
+    if not tokens_to_sync and user.encrypted_token:
+        # Fallback для совместимости
+        tokens_to_sync = [user]
+
+    if not tokens_to_sync:
+        logger.warning(f"У пользователя #{user_id} отсутствует активный токен Т-Банка.")
         return
 
-    try:
-        with Client(token) as client:
-            accounts_response = client.users.get_accounts()
+    for token_obj in tokens_to_sync:
+        token = token_obj.decrypted_token
+        if not token:
+            continue
 
-            for acc in accounts_response.accounts:
-                account, _ = Account.objects.update_or_create(
-                    account_id=acc.id,
-                    defaults={
-                        "investor": user,
-                        "name": acc.name,
-                        "account_type": str(acc.type),
-                        "status": str(acc.status),
-                    },
-                )
+        broker_token = token_obj if hasattr(token_obj, "user_id") else None
 
-                portfolio = client.operations.get_portfolio(account_id=acc.id)
-                snapshot = save_portfolio_snapshot(
-                    account=account,
-                    portfolio_data=portfolio,
-                )
-                logger.info(
-                    f"✅ Снимок #{snapshot.id} сохранен для счета '{acc.name}' "
-                    f"(инвестор #{user.id}, баланс: {snapshot.total_amount_portfolio} руб.)"
-                )
+        try:
+            with Client(token) as client:
+                accounts_response = client.users.get_accounts()
 
-    except RequestError as exc:
-        # Если токен отозван или невалиден (401/UNAUTHENTICATED) — не ретраим впустую 5 раз
-        if "UNAUTHENTICATED" in str(exc) or "401" in str(exc):
-            logger.error(f"❌ Токен пользователя #{user.id} недействителен: {exc}")
-            return
-        # Для всех остальных сетевых ошибок пробрасываем выше, чтобы сработал autoretry
-        raise
+                for acc in accounts_response.accounts:
+                    account, _ = Account.objects.update_or_create(
+                        account_id=acc.id,
+                        defaults={
+                            "investor": user,
+                            "broker_token": broker_token,
+                            "name": acc.name,
+                            "account_type": str(acc.type),
+                            "status": str(acc.status),
+                        },
+                    )
+
+                    # Если у пользователя еще не выбран активный счет — ставим этот
+                    if not user.active_account:
+                        user.active_account = account
+                        user.save(update_fields=["active_account"])
+
+                    portfolio = client.operations.get_portfolio(account_id=acc.id)
+                    snapshot = save_portfolio_snapshot(
+                        account=account,
+                        portfolio_data=portfolio,
+                        client=client,
+                    )
+                    logger.info(
+                        f"✅ Снимок #{snapshot.id} сохранен для счета '{acc.name}' "
+                        f"(инвестор #{user.id}, баланс: {snapshot.total_amount_portfolio} руб.)"
+                    )
+
+        except RequestError as exc:
+            if "UNAUTHENTICATED" in str(exc) or "401" in str(exc):
+                logger.error(f"❌ Токен {token_obj} пользователя #{user.id} недействителен: {exc}")
+                continue
+            raise
 
 
 @shared_task
@@ -75,9 +92,9 @@ def sync_portfolios():
     Диспетчер для Celery Beat.
     Раз в час находит всех пользователей с токенами и ставит каждому отдельную задачу.
     """
-    users = InvestorUser.objects.exclude(encrypted_token="")
+    user_ids = InvestorUser.objects.exclude(encrypted_token="").values_list('id', flat=True).iterator(chunk_size=2000)
     count = 0
-    for user in users:
+    for user in user_ids:
         sync_user_portfolio.delay(user.id)
         count += 1
 

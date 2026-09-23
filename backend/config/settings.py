@@ -46,6 +46,7 @@ INSTALLED_APPS = [
 
     "portfolio",
     "users",
+    "analytics",
 ]
 
 MIDDLEWARE = [

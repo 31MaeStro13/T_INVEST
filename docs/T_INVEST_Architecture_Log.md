@@ -171,7 +171,12 @@
 
 ---
 
-## 📌 Что делаем дальше:
-1. Telegram-бот на `aiogram 3.x` с HTTP-клиентом на `aiohttp`.
-2. Команды `/start`, `/accounts`, вывод баланса и списка акций с форматированием.
-3. Инфраструктура: добавление PostgreSQL в `docker-compose.yml`.
+## 📌 Что делаем дальше (Roadmap):
+1. **Milestone 3**: Аналитическое ядро на NumPy (Max Drawdown, волатильность, коэффициент Шарпа).
+2. **Milestone 4**: Календарь денежных потоков (дивиденды, купоны) и алерты по расписанию MOEX через Celery Beat.
+3. **Milestone 5**: ИИ-финансовый аналитик (Gemini / LLM + Pydantic для структурированных дайджестов).
+4. **Milestone 6: Мультиброкерский агрегатор (Все банки и брокеры РФ)**:
+   * Архитектура адаптеров (`BaseBrokerAdapter`, `TBankAdapter`, `SberAdapter`, `VTBAdapter`, `AlfaAdapter`, `FinamAdapter`).
+   * Унифицированный консолидированный портфель («All-in-One Net Worth»).
+   * Парсинг стандартизированных XML/Excel отчётов брокеров ЦБ РФ.
+

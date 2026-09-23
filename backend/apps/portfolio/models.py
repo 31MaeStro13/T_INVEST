@@ -10,6 +10,14 @@ class Account(models.Model):
         related_name = "accounts"
     )
 
+    broker_token = models.ForeignKey(
+        "users.BrokerToken",
+        on_delete=models.CASCADE,
+        related_name="accounts",
+        null=True,
+        blank=True,
+    )
+
     account_id = models.CharField(
         max_length = 64,
         unique = True,

@@ -72,39 +72,67 @@ def build_portfolio_text(account: dict, snapshot: dict) -> str:
     return "\n".join(lines)
 
 
-def build_positions_text(account: dict, snapshot: dict) -> str:
-    """Формирует подробный список активов портфеля."""
+def build_positions_text(
+    account: dict, snapshot: dict, page: int = 1, page_size: int = 5
+) -> tuple[str, int]:
+    """Формирует постраничный список позиций с сортировкой по весу в портфеле."""
     acc_name = account.get("name", "Основной счет")
     positions = snapshot.get("positions", [])
 
     if not positions:
         return (
             f"💼 <b>Счет: {acc_name}</b>\n\n"
-            "ℹ️ <i>В данном портфеле нет открытых позиций в ценных бумагах (весь баланс в кэше или валюте).</i>"
+            "ℹ️ <i>В данном портфеле нет открытых позиций в ценных бумагах (весь баланс в кэше или валюте).</i>",
+            1,
         )
 
+    # Сортируем позиции по убыванию стоимости (активы с наибольшим весом сверху)
+    sorted_positions = sorted(
+        positions,
+        key=lambda p: float(p.get("quantity") or 0) * float(p.get("current_price") or 0),
+        reverse=True,
+    )
+
+    total_count = len(sorted_positions)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    page = max(1, min(page, total_pages))
+
+    start_idx = (page - 1) * page_size
+    page_positions = sorted_positions[start_idx : start_idx + page_size]
+
     lines = [
-        f"📦 <b>Позиции в портфеле ({acc_name}):</b>\n",
+        f"📦 <b>Позиции в портфеле ({acc_name})</b>",
+        f"<i>Всего активов: {total_count} шт. (Стр. {page}/{total_pages})</i>\n",
     ]
 
-    for p in positions:
-        name = p.get("name") or "Неизвестный инструмент"
+    for p in page_positions:
         ticker = p.get("ticker") or p.get("figi", "")
+        name = p.get("name") or ticker or "Ценная бумага"
         qty = float(p.get("quantity") or 0)
         price = float(p.get("current_price") or 0)
         yield_val = p.get("expected_yield")
         total_pos = qty * price
 
-        type_icon = "📈" if p.get("instrument_type") == "share" else "🏛"
+        type_raw = str(p.get("instrument_type") or "").lower()
+        if "share" in type_raw:
+            type_icon = "📈"
+        elif "bond" in type_raw:
+            type_icon = "🏛"
+        elif "etf" in type_raw:
+            type_icon = "📊"
+        else:
+            type_icon = "💵"
+
+        ticker_display = f" (<code>{ticker}</code>)" if ticker and ticker != name else ""
 
         lines.append(
-            f"{type_icon} <b>{name}</b> (<code>{ticker}</code>)\n"
+            f"{type_icon} <b>{name}</b>{ticker_display}\n"
             f"   ├ Количество: <b>{qty:g} шт.</b>\n"
             f"   ├ Стоимость: <b>{format_currency(total_pos)}</b> ({format_currency(price)} / шт.)\n"
             f"   └ PnL: {format_yield(yield_val)}\n"
         )
 
-    return "\n".join(lines)
+    return "\n".join(lines), total_pages
 
 
 def build_risk_audit_text(account: dict, snapshot: dict) -> str:
@@ -159,3 +187,83 @@ def build_risk_audit_text(account: dict, snapshot: dict) -> str:
         lines.append("✅ <b>Умеренный / сбалансированный профиль</b>.")
 
     return "\n".join(lines)
+
+def build_analytics_text(data: dict) -> str:
+    if not data:
+        return "❌ <i>Данные аналитики пока недоступны.</i>"
+
+    account_name = data.get("account_name", "Счёт")
+    risk_level = data.get("risk_level", "Нет данных")
+    volatility = float(data.get("annual_volatility") or 0.0)
+    max_dd = float(data.get("max_drawdown") or 0.0)
+    sharpe = float(data.get("sharpe_ratio") or 0.0)
+
+    # 1. Интерпретация волатильности
+    if volatility == 0.0:
+        vol_verdict = "<i>(идёт накопление истории котировок)</i>"
+    elif volatility < 8.0:
+        vol_verdict = "🟢 <i>Низкая (портфель стабилен, как ОФЗ или фонды ликвидности)</i>"
+    elif volatility < 20.0:
+        vol_verdict = "🟡 <i>Умеренная (нормальный рыночный риск акций РФ)</i>"
+    else:
+        vol_verdict = "🔴 <i>Высокая (сильные ценовые горки, повышенный риск)</i>"
+
+    # 2. Интерпретация максимальной просадки (mDD)
+    if max_dd == 0.0:
+        dd_verdict = "🟢 <i>Падений от пика не зафиксировано</i>"
+    elif abs(max_dd) < 3.0:
+        dd_verdict = f"🟢 <i>Микро-колебания ({max_dd:.2f}% от пика, стабильно)</i>"
+    elif abs(max_dd) < 15.0:
+        dd_verdict = f"🟡 <i>Рабочая коррекция ({max_dd:.2f}% от пика)</i>"
+    else:
+        dd_verdict = f"🔴 <i>Глубокая просадка ({max_dd:.2f}%, тест на крепость нервов)</i>"
+
+    # 3. Интерпретация коэффициента Шарпа
+    if sharpe == 0.0:
+        sharpe_verdict = "<i>(считается при накоплении данных от 3+ дней)</i>"
+    elif sharpe < 0:
+        sharpe_verdict = "🔴 <i>Хуже вклада под 19% (риск акций пока не окупается)</i>"
+    elif sharpe < 1.0:
+        sharpe_verdict = "🟡 <i>Слабая отдача (доходность есть, но риск велик)</i>"
+    elif sharpe < 2.0:
+        sharpe_verdict = "🟢 <i>Хорошо (риск полностью окупается доходностью)</i>"
+    else:
+        sharpe_verdict = "🏆 <i>Превосходно (высочайшая отдача на единицу риска)</i>"
+
+    progress_bar = format_progress_bar(volatility, 100.0)
+
+    text = (
+        f"📊 <b>Аналитический аудит: {account_name}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🛡 <b>Риск-профиль:</b> <b>{risk_level}</b>\n\n"
+        f"📈 <b>Годовая волатильность:</b> <code>{volatility:.2f}%</code>\n"
+        f"   └ {vol_verdict}\n"
+        f"   {progress_bar}\n\n"
+        f"📉 <b>Макс. просадка (mDD):</b> <code>{max_dd:.2f}%</code>\n"
+        f"   └ {dd_verdict}\n\n"
+        f"🧮 <b>Коэффициент Шарпа:</b> <code>{sharpe:.3f}</code>\n"
+        f"   └ {sharpe_verdict}\n\n"
+    )
+
+    sectors = data.get("sector_allocation", {})
+    if sectors:
+        text += "🍕 <b>Структура портфеля:</b>\n"
+        for sector, ratio in sectors.items():
+            percentage = round(ratio * 100, 1)
+            text += f"  ▪️ {sector.upper()}: <code>{percentage}%</code>\n"
+        text += "\n"
+
+    concentration = data.get("concentration_risk", [])
+    critical_positions = [p for p in concentration if p.get("is_critical", False)]
+
+    if critical_positions:
+        text += "⚠️ <b>Риск высокой концентрации!</b>\n"
+        text += "Следующие активы занимают более 25% портфеля:\n"
+        for pos in critical_positions:
+            pos_ratio = round(pos.get("ratio", 0.0) * 100, 1)
+            name_str = f" ({pos['name']})" if pos.get("name") else ""
+            text += f"  ❌ <b>{pos['ticker']}</b>{name_str} — <code>{pos_ratio}%</code>\n"
+    else:
+        text += "✅ <b>Диверсификация в норме:</b> критических перекосов в топ-активах не обнаружено.\n"
+
+    return text
