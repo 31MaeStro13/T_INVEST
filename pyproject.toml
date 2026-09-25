@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "agno>=3.0.11",
     "aiogram>=3.31.0",
     "aiohttp>=3.14.3",
     "aiohttp-socks>=0.12.0",
@@ -18,6 +19,7 @@ dependencies = [
     "environs>=15.2.0",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
+    "openai>=3.19.2",
     "python-dotenv>=1.2.3",
     "redis>=8.1.0",
     "t-tech-investments>=1.49.3",
