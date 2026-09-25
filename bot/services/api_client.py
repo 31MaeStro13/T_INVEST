@@ -210,3 +210,20 @@ class BackendAPIClient:
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.error(f"Сбой загрузки графика (get_chart): {exc}")
             return None
+
+    async def toggle_alerts(self, telegram_id: int) -> bool | None:
+        """Переключает статус риск-алертов пользователя."""
+        url = f"{self.base_url}/api/v1/users/toggle_alerts/"
+        payload = {"telegram_id": telegram_id}
+        try:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("alerts_enabled")
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой переключения алертов (toggle_alerts): {exc}")
+            return None
+

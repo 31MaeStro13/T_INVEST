@@ -1,8 +1,7 @@
-"""
-Фоновые задачи Celery для пакетного пересчёта рисков с чанкингом.
-"""
-
 import logging
+import os
+import json
+import urllib.request
 from celery import shared_task
 import numpy as np
 from django.core.cache import cache
@@ -10,6 +9,8 @@ from django.core.cache import cache
 from users.models import InvestorUser
 from portfolio.models import Account, PortfolioSnapshot
 from .batch import compute_batch_metrics
+from .alerts import evaluate_risk_triggers
+from .service import get_consolidated_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +89,81 @@ def nightly_batch_risk_audit(chunk_size: int = 100) -> dict[str, int]:
 
     logger.info(f"Ночной аудит: запущено {len(chunks)} чанков для {total_users} пользователей.")
     return {"total_users": total_users, "chunks_dispatched": len(chunks)}
+
+
+@shared_task(name="analytics.check_and_send_risk_alerts")
+def check_and_send_risk_alerts(target_telegram_id: int | None = None) -> dict[str, int]:
+    """
+    Периодическая задача Celery: аудит рисков и отправка Smart Alerts в Telegram.
+    Проверяет:
+      1. Концентрацию активов (>25%)
+      2. Превышение порога просадки (mDD <= -5%)
+      3. Отрицательный Шарп при повышенной волатильности
+    Дедупликация: не чаще одного алерта по конкретному риску в 24 часа через Redis.
+    """
+    users_query = InvestorUser.objects.filter(alerts_enabled=True)
+    if target_telegram_id:
+        users_query = users_query.filter(telegram_id=target_telegram_id)
+
+    users = list(users_query)
+    bot_token = os.getenv("BOT_TOKEN", "")
+    if not bot_token:
+        logger.warning("BOT_TOKEN не задан, отправка алертов невозможна.")
+        return {"sent": 0, "skipped": 0}
+
+    sent_count = 0
+    skipped_count = 0
+
+    for user in users:
+        if not user.accounts.exists():
+            continue
+
+        analytics = get_consolidated_analytics(user)
+        if not analytics:
+            continue
+
+        alerts = evaluate_risk_triggers(analytics)
+        if not alerts:
+            continue
+
+        for alert in alerts:
+            alert_type = alert.get("type", "general")
+            item_key = alert.get("item_key", "default")
+            dedup_key = f"alert_sent:{user.id}:{alert_type}:{item_key}"
+
+            # Проверка дедупликации в Redis (24 часа)
+            if cache.get(dedup_key):
+                skipped_count += 1
+                continue
+
+            text = (
+                f"🔔 <b>Мониторинг рисков: {analytics.get('account_name', 'Все счета')}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>{alert['title']}</b>\n"
+                f"{alert['message']}\n\n"
+                "⚖️ <i>Предоставленная информация носит исключительно ознакомительный и аналитический характер "
+                "и не является индивидуальной инвестиционной рекомендацией (ст. 6.1 39-ФЗ).</i>"
+            )
+
+            try:
+                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                payload = json.dumps({
+                    "chat_id": user.telegram_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        sent_count += 1
+                        cache.set(dedup_key, 1, timeout=86400)
+                        logger.info(f"Алерт '{alert_type}' успешно отправлен пользователю #{user.telegram_id}")
+            except Exception as e:
+                logger.error(f"Сбой отправки алерта пользователю #{user.telegram_id}: {e}")
+
+    return {"sent": sent_count, "skipped": skipped_count}

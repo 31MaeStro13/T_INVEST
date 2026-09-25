@@ -1,6 +1,8 @@
 from decimal import Decimal
 from typing import Any
 
+from bot.lexicon.lexicon_ru import LEXICON_RU
+
 
 def format_currency(val: Any) -> str:
     """Форматирует сумму в финансовый вид: 1 250 400.00 ₽"""
@@ -266,4 +268,5 @@ def build_analytics_text(data: dict) -> str:
     else:
         text += "✅ <b>Диверсификация в норме:</b> критических перекосов в топ-активах не обнаружено.\n"
 
+    text += LEXICON_RU["disclaimer_safe_harbor"]
     return text

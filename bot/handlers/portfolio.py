@@ -91,7 +91,13 @@ async def process_portfolio_button(message: Message, api_client: BackendAPIClien
 
     text = build_portfolio_text(account, snapshot)
     positions_count = len(snapshot.get("positions", []))
-    kb = get_portfolio_keyboard(account_id=account["id"], positions_count=positions_count)
+    status = await api_client.check_user_status(telegram_id=message.from_user.id)
+    alerts_enabled = status.get("alerts_enabled", True) if status else True
+    kb = get_portfolio_keyboard(
+        account_id=account["id"],
+        positions_count=positions_count,
+        alerts_enabled=alerts_enabled,
+    )
 
     await message.answer(text=text, reply_markup=kb, parse_mode="HTML")
 
@@ -172,7 +178,13 @@ async def cb_view_portfolio(callback: CallbackQuery, api_client: BackendAPIClien
 
     text = build_portfolio_text(account, snapshot)
     positions_count = len(snapshot.get("positions", []))
-    kb = get_portfolio_keyboard(account_id=account["id"], positions_count=positions_count)
+    status = await api_client.check_user_status(telegram_id=callback.from_user.id)
+    alerts_enabled = status.get("alerts_enabled", True) if status else True
+    kb = get_portfolio_keyboard(
+        account_id=account["id"],
+        positions_count=positions_count,
+        alerts_enabled=alerts_enabled,
+    )
 
     await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
@@ -193,7 +205,13 @@ async def cb_refresh_portfolio(callback: CallbackQuery, api_client: BackendAPICl
     if snapshot and account:
         text = build_portfolio_text(account, snapshot)
         positions_count = len(snapshot.get("positions", []))
-        kb = get_portfolio_keyboard(account_id=account["id"], positions_count=positions_count)
+        status = await api_client.check_user_status(telegram_id=callback.from_user.id)
+        alerts_enabled = status.get("alerts_enabled", True) if status else True
+        kb = get_portfolio_keyboard(
+            account_id=account["id"],
+            positions_count=positions_count,
+            alerts_enabled=alerts_enabled,
+        )
         try:
             await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
         except Exception:
@@ -333,8 +351,38 @@ async def cb_chart_portfolio(callback: CallbackQuery, api_client: BackendAPIClie
         )
         return
     photo = BufferedInputFile(chart_bytes, filename=f"portfolio_{acc_id_raw}.png")
+    caption = f"{LEXICON_RU['chart_caption']}{LEXICON_RU['disclaimer_safe_harbor']}"
     await callback.message.answer_photo(
         photo=photo,
-        caption=LEXICON_RU["chart_caption"],
+        caption=caption,
         parse_mode="HTML",
     )
+
+
+@router.callback_query(F.data.startswith("portfolio:alerts:"))
+async def cb_toggle_alerts(callback: CallbackQuery, api_client: BackendAPIClient):
+    """Интерактивное переключение статуса риск-алертов."""
+    acc_id_raw = callback.data.split(":")[2]
+    new_status = await api_client.toggle_alerts(telegram_id=callback.from_user.id)
+    if new_status is None:
+        await callback.answer(LEXICON_RU["backend_error"], show_alert=True)
+        return
+
+    toast = LEXICON_RU["alerts_enabled_toast"] if new_status else LEXICON_RU["alerts_disabled_toast"]
+    await callback.answer(toast, show_alert=False)
+
+    _, snapshot, _ = await _get_account_and_snapshot(
+        api_client, telegram_id=callback.from_user.id, account_id=acc_id_raw
+    )
+    positions_count = len(snapshot.get("positions", [])) if snapshot else 0
+
+    kb = get_portfolio_keyboard(
+        account_id=acc_id_raw,
+        positions_count=positions_count,
+        alerts_enabled=new_status,
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+

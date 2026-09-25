@@ -10,8 +10,13 @@ def get_cancel_token_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def get_portfolio_keyboard(account_id: int | str, positions_count: int = 0) -> InlineKeyboardMarkup:
+def get_portfolio_keyboard(
+    account_id: int | str,
+    positions_count: int = 0,
+    alerts_enabled: bool = True,
+) -> InlineKeyboardMarkup:
     """Интерактивное меню управления конкретным портфелем."""
+    alert_text = "🔔 Алерты: ВКЛ" if alerts_enabled else "🔕 Алерты: ВЫКЛ"
     buttons = [
         [
             InlineKeyboardButton(text="🔄 Обновить", callback_data=f"portfolio:refresh:{account_id}"),
@@ -25,6 +30,7 @@ def get_portfolio_keyboard(account_id: int | str, positions_count: int = 0) -> I
             InlineKeyboardButton(text="⚠️ Экспресс-аудит", callback_data=f"portfolio:audit:{account_id}"),
         ],
         [
+            InlineKeyboardButton(text=alert_text, callback_data=f"portfolio:alerts:{account_id}"),
             InlineKeyboardButton(text="📑 Сменить счет", callback_data="portfolio:accounts"),
         ],
     ]

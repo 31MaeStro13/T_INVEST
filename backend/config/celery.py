@@ -14,6 +14,10 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     "sync-portfolios-every-hour": {
         "task": "portfolio.tasks.sync_portfolios",
-        "schedule": 3600.0,  # каждый час (для теста можно поставить, например, 60.0)
+        "schedule": 3600.0,  # каждый час
+    },
+    "check-risk-alerts-periodic": {
+        "task": "analytics.check_and_send_risk_alerts",
+        "schedule": crontab(hour=19, minute=0),  # Каждый вечер в 19:00 МСК
     },
 }

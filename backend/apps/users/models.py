@@ -22,6 +22,11 @@ class InvestorUser(models.Model):
         related_name="+",
     )
 
+    alerts_enabled = models.BooleanField(
+        default=True,
+        verbose_name="Включены ли риск-алерты",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def set_token(self, raw_token: str) -> None:

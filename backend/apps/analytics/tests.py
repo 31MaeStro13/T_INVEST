@@ -141,3 +141,26 @@ class AnalyticsEngineTestCase(unittest.TestCase):
         # Проверка сигнатуры PNG (\x89PNG\r\n\x1a\n)
         self.assertTrue(chart_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_evaluate_risk_triggers_triggers_correctly(self):
+        """Проверка срабатывания триггеров концентрации, просадки и Шарпа."""
+        from .alerts import evaluate_risk_triggers
+
+        mock_data = {
+            "concentration_risk": [
+                {"ticker": "SBER", "name": "Сбербанк", "ratio": 0.35, "is_critical": True},
+                {"ticker": "GAZP", "name": "Газпром", "ratio": 0.10, "is_critical": False},
+            ],
+            "max_drawdown": -7.5,
+            "annual_volatility": 22.0,
+            "sharpe_ratio": -0.5,
+            "has_sufficient_data": True,
+        }
+
+        alerts = evaluate_risk_triggers(mock_data)
+        alert_types = [a["type"] for a in alerts]
+
+        self.assertIn("concentration", alert_types)
+        self.assertIn("drawdown", alert_types)
+        self.assertIn("sharpe_warning", alert_types)
+        self.assertEqual(len(alerts), 3)
+

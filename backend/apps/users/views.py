@@ -37,6 +37,7 @@ class UserStatusView(APIView):
                     "active_account_name": None,
                     "active_token_name": None,
                     "tokens_count": 0,
+                    "alerts_enabled": True,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -55,7 +56,32 @@ class UserStatusView(APIView):
                 "active_token_id": active_tok.id if active_tok else None,
                 "active_token_name": active_tok.name if active_tok else None,
                 "tokens_count": user.broker_tokens.count(),
+                "alerts_enabled": user.alerts_enabled,
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ToggleAlertsView(APIView):
+    """POST /api/v1/users/toggle_alerts/ — переключение статуса риск-алертов."""
+
+    def post(self, request):
+        tg_id = request.data.get("telegram_id")
+        if not tg_id or not str(tg_id).isdigit():
+            return Response(
+                {"detail": "telegram_id обязателен и должен быть числом"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        if not user:
+            return Response({"detail": "Пользователь не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        user.alerts_enabled = not user.alerts_enabled
+        user.save(update_fields=["alerts_enabled"])
+
+        return Response(
+            {"alerts_enabled": user.alerts_enabled},
             status=status.HTTP_200_OK,
         )
 
