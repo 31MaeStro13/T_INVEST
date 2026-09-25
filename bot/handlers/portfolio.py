@@ -451,17 +451,29 @@ async def msg_ask_ai_process(message: Message, state: FSMContext, api_client: Ba
         pass
 
     kb = get_back_to_portfolio_keyboard(account_id=acc_id_raw)
-    full_text = f"{answer}{LEXICON_RU['disclaimer_safe_harbor']}"
+
+    import html
+    # Очищаем от случайных маркдаун-символов
+    clean_answer = (
+        answer.replace("###", "")
+        .replace("##", "")
+        .replace("#", "")
+        .replace("**", "")
+        .replace("*", "")
+        .strip()
+    )
+    escaped_answer = html.escape(clean_answer)
+    full_text = f"{escaped_answer}{LEXICON_RU['disclaimer_safe_harbor']}"
 
     # Telegram limit 4096 chars
     if len(full_text) > 4000:
         full_text = full_text[:3990] + "...\n[Сообщение сокращено]"
 
-    # Fallback parsing in case Markdown has unclosed tags
     try:
-        await message.answer(text=full_text, reply_markup=kb, parse_mode="Markdown")
+        await message.answer(text=full_text, reply_markup=kb, parse_mode="HTML")
     except Exception:
         await message.answer(text=full_text, reply_markup=kb, parse_mode=None)
+
 
     await state.clear()
 
