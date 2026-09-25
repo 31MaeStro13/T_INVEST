@@ -164,3 +164,22 @@ class AnalyticsEngineTestCase(unittest.TestCase):
         self.assertIn("sharpe_warning", alert_types)
         self.assertEqual(len(alerts), 3)
 
+    def test_ask_ai_auditor_endpoint_success(self):
+        """Проверка эндпоинта /api/v1/analytics/ask_ai/ с моком LLM."""
+        from unittest.mock import patch
+        from users.models import InvestorUser
+        from rest_framework.test import APIClient
+
+        user = InvestorUser.objects.create(telegram_id=999888777)
+        client = APIClient()
+
+        with patch("analytics.views.ask_auditor", return_value="Аудит: риски в норме."):
+            response = client.post(
+                "/api/v1/analytics/ask_ai/",
+                {"telegram_id": 999888777, "prompt": "Какие риски?"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["response"], "Аудит: риски в норме.")
+
+

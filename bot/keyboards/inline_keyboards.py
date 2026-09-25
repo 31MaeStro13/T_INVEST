@@ -30,11 +30,23 @@ def get_portfolio_keyboard(
             InlineKeyboardButton(text="⚠️ Экспресс-аудит", callback_data=f"portfolio:audit:{account_id}"),
         ],
         [
+            InlineKeyboardButton(text="🧠 Спросить AI", callback_data=f"portfolio:ask_ai:{account_id}"),
             InlineKeyboardButton(text=alert_text, callback_data=f"portfolio:alerts:{account_id}"),
+        ],
+        [
             InlineKeyboardButton(text="📑 Сменить счет", callback_data="portfolio:accounts"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_ai_cancel_keyboard(account_id: int | str) -> InlineKeyboardMarkup:
+    """Кнопка отмены режима вопросов к AI-аудитору."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"ai:cancel:{account_id}")]
+        ]
+    )
 
 
 def get_back_to_portfolio_keyboard(account_id: int | str) -> InlineKeyboardMarkup:
@@ -44,6 +56,7 @@ def get_back_to_portfolio_keyboard(account_id: int | str) -> InlineKeyboardMarku
             [InlineKeyboardButton(text="🔙 К сводке портфеля", callback_data=f"portfolio:view:{account_id}")]
         ]
     )
+
 
 
 def get_accounts_keyboard(accounts: list[dict], is_consolidated_active: bool = False) -> InlineKeyboardMarkup:

@@ -227,3 +227,23 @@ class BackendAPIClient:
             logger.error(f"Сбой переключения алертов (toggle_alerts): {exc}")
             return None
 
+    async def ask_ai_auditor(self, telegram_id: int, prompt: str) -> str:
+        """Отправляет запрос к AI-агенту финансового аудита на базе Agno."""
+        url = f"{self.base_url}/api/v1/analytics/ask_ai/"
+        payload = {"telegram_id": telegram_id, "prompt": prompt}
+        try:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=45)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("response", "Не удалось получить ответ.")
+                logger.warning(f"Ошибка ответа AI-агента: статус {response.status}")
+                return "⚠️ Не удалось получить ответ от AI-агента. Попробуйте позже."
+        except asyncio.TimeoutError:
+            return "⏳ AI-агент обрабатывает запрос слишком долго. Пожалуйста, попробуйте сформулировать вопрос короче."
+        except aiohttp.ClientError as exc:
+            logger.error(f"Сбой подключения к бэкенду (ask_ai_auditor): {exc}")
+            return "⚠️ Ошибка связи с сервером AI-аналитики."
+
+

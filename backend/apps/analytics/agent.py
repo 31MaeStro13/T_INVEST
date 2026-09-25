@@ -14,11 +14,13 @@ from agno.models.google import Gemini
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Проверяем и настраиваем прокси для обращения к Gemini API при необходимости
-_proxy = os.getenv("HTTPS_PROXY") or os.getenv("TELEGRAM_PROXY") or "http://127.0.0.1:10808"
+# Проверяем и настраиваем прокси для обращения к Gemini API
+_default_proxy = "http://172.17.0.1:10808" if os.path.exists("/.dockerenv") else "http://127.0.0.1:10808"
+_proxy = os.getenv("GEMINI_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("TELEGRAM_PROXY") or _default_proxy
 if _proxy and not os.getenv("HTTPS_PROXY"):
     os.environ["HTTPS_PROXY"] = _proxy
     os.environ["HTTP_PROXY"] = _proxy
+
 
 
 def make_portfolio_tools(telegram_id: int):

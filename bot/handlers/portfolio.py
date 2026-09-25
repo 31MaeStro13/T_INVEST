@@ -1,16 +1,20 @@
 import asyncio
 import logging
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
-from aiogram.types import BufferedInputFile
+from aiogram.fsm.context import FSMContext
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+
 
 from bot.keyboards.inline_keyboards import (
     get_accounts_keyboard,
+    get_ai_cancel_keyboard,
     get_back_to_portfolio_keyboard,
     get_portfolio_keyboard,
     get_positions_pagination_keyboard,
     get_tokens_keyboard,
 )
+from bot.states.ai_states import AIAuditorState
+
 from bot.lexicon.lexicon_ru import LEXICON_RU
 from bot.services.api_client import BackendAPIClient
 from bot.services.formatter import (
@@ -385,4 +389,80 @@ async def cb_toggle_alerts(callback: CallbackQuery, api_client: BackendAPIClient
         await callback.message.edit_reply_markup(reply_markup=kb)
     except Exception:
         pass
+
+
+@router.callback_query(F.data.startswith("portfolio:ask_ai:"))
+async def cb_ask_ai_start(callback: CallbackQuery, state: FSMContext):
+    """Инициализация диалога с AI-аудитором."""
+    acc_id_raw = callback.data.split(":")[2]
+    await state.set_state(AIAuditorState.waiting_for_question)
+    await state.update_data(account_id=acc_id_raw)
+    kb = get_ai_cancel_keyboard(account_id=acc_id_raw)
+    await callback.message.answer(
+        text=LEXICON_RU["ai_auditor_prompt"],
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ai:cancel:"))
+async def cb_ask_ai_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отмена режима вопросов к AI-аудитору."""
+    acc_id_raw = callback.data.split(":")[2]
+    await state.clear()
+    kb = get_back_to_portfolio_keyboard(account_id=acc_id_raw)
+    await callback.message.edit_text(
+        text=LEXICON_RU["ai_canceled"],
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AIAuditorState.waiting_for_question)
+async def msg_ask_ai_process(message: Message, state: FSMContext, api_client: BackendAPIClient):
+    """Обработка вопроса пользователя к AI-аудитору."""
+    user_query = (message.text or "").strip()
+    if not user_query:
+        await message.answer("Пожалуйста, отправьте текстовый вопрос.")
+        return
+
+    data = await state.get_data()
+    acc_id_raw = data.get("account_id", "consolidated")
+
+    wait_msg = await message.answer(
+        text=LEXICON_RU["ai_auditor_waiting"],
+        parse_mode="HTML",
+    )
+
+    try:
+        answer = await api_client.ask_ai_auditor(
+            telegram_id=message.from_user.id,
+            prompt=user_query,
+        )
+    except Exception as exc:
+        logger.exception("Ошибка при вызове AI-аудитора: %s", exc)
+        answer = "⚠️ Произошла ошибка при анализе портфеля. Попробуйте позже."
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    kb = get_back_to_portfolio_keyboard(account_id=acc_id_raw)
+    full_text = f"{answer}{LEXICON_RU['disclaimer_safe_harbor']}"
+
+    # Telegram limit 4096 chars
+    if len(full_text) > 4000:
+        full_text = full_text[:3990] + "...\n[Сообщение сокращено]"
+
+    # Fallback parsing in case Markdown has unclosed tags
+    try:
+        await message.answer(text=full_text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await message.answer(text=full_text, reply_markup=kb, parse_mode=None)
+
+    await state.clear()
+
 

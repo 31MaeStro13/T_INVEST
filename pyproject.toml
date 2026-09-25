@@ -17,11 +17,13 @@ dependencies = [
     "django>=6.1.1",
     "djangorestframework>=3.18.1",
     "environs>=15.2.0",
+    "google-genai>=2.25.0",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "openai>=3.19.2",
     "python-dotenv>=1.2.3",
     "redis>=8.1.0",
+    "socksio>=1.0.0",
     "t-tech-investments>=1.49.3",
 ]
 

@@ -6,6 +6,8 @@ from users.models import InvestorUser
 from .service import get_analytics_for_account, get_consolidated_analytics
 from django.http import HttpResponse
 from .service import get_chart_for_account, get_consolidated_chart
+from .agent import ask_auditor
+
 
 
 class ConsolidatedAnalyticsView(APIView):
@@ -86,3 +88,41 @@ class ConsolidatedChartView(APIView):
         if not chart_bytes:
             return Response({"detail": "Данные не найдены."}, status=status.HTTP_404_NOT_FOUND)
         return HttpResponse(chart_bytes, content_type="image/png")
+
+
+class AskAIAuditorView(APIView):
+    """
+    POST /api/v1/analytics/ask_ai/
+    Body:
+        telegram_id: int
+        prompt: str
+    """
+
+    def post(self, request):
+        telegram_id = request.data.get("telegram_id")
+        prompt = request.data.get("prompt")
+        if not telegram_id or not prompt:
+            return Response(
+                {"detail": "telegram_id и prompt обязательны."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            telegram_id = int(telegram_id)
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "Некорректный telegram_id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = InvestorUser.objects.filter(telegram_id=telegram_id).first()
+        if not user:
+            return Response(
+                {"detail": "Пользователь не найден."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        answer = ask_auditor(telegram_id=telegram_id, user_query=str(prompt))
+        return Response({"response": answer}, status=status.HTTP_200_OK)
+
+
+
