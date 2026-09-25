@@ -14,12 +14,33 @@ from agno.models.google import Gemini
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Проверяем и настраиваем прокси для обращения к Gemini API
-_default_proxy = "http://172.17.0.1:10808" if os.path.exists("/.dockerenv") else "http://127.0.0.1:10808"
-_proxy = os.getenv("GEMINI_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("TELEGRAM_PROXY") or _default_proxy
-if _proxy and not os.getenv("HTTPS_PROXY"):
+def _detect_proxy() -> str | None:
+    custom_proxy = os.getenv("GEMINI_PROXY") or os.getenv("HTTPS_PROXY")
+    if custom_proxy and "127.0.0.1" not in custom_proxy:
+        return custom_proxy
+
+    # Внутри Docker 127.0.0.1 хоста доступен через IP шлюза контейнера
+    if os.path.exists("/.dockerenv"):
+        import socket, struct
+        try:
+            with open("/proc/net/route") as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        gw_ip = socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+                        return f"http://{gw_ip}:10808"
+        except Exception:
+            return "http://172.19.0.1:10808"
+        return "http://172.19.0.1:10808"
+
+    return os.getenv("TELEGRAM_PROXY") or "http://127.0.0.1:10808"
+
+
+_proxy = _detect_proxy()
+if _proxy:
     os.environ["HTTPS_PROXY"] = _proxy
     os.environ["HTTP_PROXY"] = _proxy
+
 
 
 
