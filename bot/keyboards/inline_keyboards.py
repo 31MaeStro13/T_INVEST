@@ -21,7 +21,10 @@ def get_portfolio_keyboard(account_id: int | str, positions_count: int = 0) -> I
             ),
         ],
         [
+            InlineKeyboardButton(text="📊 График", callback_data=f"portfolio:chart:{account_id}"),
             InlineKeyboardButton(text="⚠️ Экспресс-аудит", callback_data=f"portfolio:audit:{account_id}"),
+        ],
+        [
             InlineKeyboardButton(text="📑 Сменить счет", callback_data="portfolio:accounts"),
         ],
     ]

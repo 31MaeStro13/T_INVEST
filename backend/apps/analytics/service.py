@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from portfolio.models import Account, PortfolioSnapshot
 from . import engine
+from django.core.cache import cache
+from .charts import generate_portfolio_dashboard
 
 
 def get_analytics_for_account(account_id: int, days: int = 90, risk_free_rate: float = 0.19) -> dict | None:
@@ -122,3 +124,80 @@ def get_consolidated_analytics(user, days: int = 90, risk_free_rate: float = 0.1
 
     return result
 
+def get_chart_for_account(account_id: int) -> bytes | None:
+    """
+    Генерирует PNG-дашборд для конкретного брокерского счета с кэшированием в Redis.
+    """
+    cache_key = f"chart:account:{account_id}"
+    cached_chart = cache.get(cache_key)
+    if cached_chart:
+        return cached_chart
+    try:
+        account = Account.objects.get(pk=account_id)
+    except Account.DoesNotExist:
+        return None
+    # Достаем хронологию (только даты и балансы)
+    snapshots = (
+        account.snapshots
+        .order_by("created_at")
+        .values_list("created_at", "total_amount_portfolio")
+    )
+    dates = [s[0] for s in snapshots]
+    values = [float(s[1]) for s in snapshots]
+    # Доли активов из последнего снимка
+    latest = account.snapshots.order_by("-created_at").first()
+    assets = {
+        "shares_amount": float(latest.total_amount_shares) if latest else 0.0,
+        "bonds_amount": float(latest.total_amount_bonds) if latest else 0.0,
+        "etf_amount": float(latest.total_amount_etf) if latest else 0.0,
+        "currencies_amount": float(latest.total_amount_currencies) if latest else 0.0,
+    }
+    chart_bytes = generate_portfolio_dashboard(
+        dates=dates,
+        values=values,
+        assets=assets,
+        account_name=account.name,
+    )
+    # Кэшируем результат в Redis на 10 минут
+    cache.set(cache_key, chart_bytes, timeout=600)
+    return chart_bytes
+
+
+def get_consolidated_chart(user) -> bytes | None:
+    """
+    Генерирует сводный PNG-дашборд по всем счетам пользователя с кэшированием в Redis.
+    """
+    cache_key = f"chart:consolidated:{user.id}"
+    cached_chart = cache.get(cache_key)
+    if cached_chart:
+        return cached_chart
+    from portfolio.services import get_consolidated_snapshot
+    # Текущие доли по всем счетам
+    consolidated_snap = get_consolidated_snapshot(user)
+    if not consolidated_snap:
+        return None
+    assets = {
+        "shares_amount": float(consolidated_snap.get("total_amount_shares") or 0.0),
+        "bonds_amount": float(consolidated_snap.get("total_amount_bonds") or 0.0),
+        "etf_amount": float(consolidated_snap.get("total_amount_etf") or 0.0),
+        "currencies_amount": float(consolidated_snap.get("total_amount_currencies") or 0.0),
+    }
+    # Для сводной динамики берем снимки всех активных счетов
+    active_token = user.broker_tokens.filter(is_active=True).first()
+    accounts = user.accounts.filter(broker_token=active_token) if active_token else user.accounts.all()
+    snapshots = (
+        PortfolioSnapshot.objects
+        .filter(account__in=accounts)
+        .order_by("created_at")
+        .values_list("created_at", "total_amount_portfolio")
+    )
+    dates = [s[0] for s in snapshots]
+    values = [float(s[1]) for s in snapshots]
+    chart_bytes = generate_portfolio_dashboard(
+        dates=dates,
+        values=values,
+        assets=assets,
+        account_name="Все счета банка",
+    )
+    cache.set(cache_key, chart_bytes, timeout=600)
+    return chart_bytes

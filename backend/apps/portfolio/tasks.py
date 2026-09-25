@@ -5,6 +5,7 @@ from celery import shared_task
 from t_tech.invest import Client
 from t_tech.invest.exceptions import RequestError
 from users.models import InvestorUser
+from django.core.cache import cache
 
 from .models import Account
 from .services import save_portfolio_snapshot
@@ -78,6 +79,9 @@ def sync_user_portfolio(self, user_id: int):
                         f"✅ Снимок #{snapshot.id} сохранен для счета '{acc.name}' "
                         f"(инвестор #{user.id}, баланс: {snapshot.total_amount_portfolio} руб.)"
                     )
+                    
+                    cache.delete(f"chart:account:{account.id}")
+                    cache.delete(f"chart:consolidated:{user.id}")
 
         except RequestError as exc:
             if "UNAUTHENTICATED" in str(exc) or "401" in str(exc):

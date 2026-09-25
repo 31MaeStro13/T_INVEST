@@ -2,6 +2,7 @@ import asyncio
 import logging
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile
 
 from bot.keyboards.inline_keyboards import (
     get_accounts_keyboard,
@@ -314,3 +315,26 @@ async def cb_active_token(callback: CallbackQuery):
 async def cb_noop(callback: CallbackQuery):
     """Пустой обработчик для информационных кнопок пагинатора."""
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("portfolio:chart:"))
+async def cb_chart_portfolio(callback: CallbackQuery, api_client: BackendAPIClient):
+    """Генерация и отправка графического дашборда."""
+    acc_id_raw = callback.data.split(":")[2]
+    await callback.answer(LEXICON_RU["chart_generating"], show_alert=False)
+    chart_bytes = await api_client.get_chart(
+        account_id=acc_id_raw,
+        telegram_id=callback.from_user.id,
+    )
+    if not chart_bytes:
+        await callback.message.answer(
+            text=LEXICON_RU["chart_error"],
+            parse_mode="HTML",
+        )
+        return
+    photo = BufferedInputFile(chart_bytes, filename=f"portfolio_{acc_id_raw}.png")
+    await callback.message.answer_photo(
+        photo=photo,
+        caption=LEXICON_RU["chart_caption"],
+        parse_mode="HTML",
+    )

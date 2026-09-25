@@ -16,6 +16,7 @@ dependencies = [
     "django>=6.1.1",
     "djangorestframework>=3.18.1",
     "environs>=15.2.0",
+    "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "python-dotenv>=1.2.3",
     "redis>=8.1.0",
@@ -32,3 +33,11 @@ build-backend = "uv_build"
 [[tool.uv.index]]
 name = "tbank"
 url = "https://opensource.tbank.ru/api/v4/projects/238/packages/pypi/simple"
+explicit = true
+
+[tool.uv.sources]
+t-tech-investments = { index = "tbank" }
+
+[tool.uv]
+allow-insecure-host = ["opensource.tbank.ru"]
+

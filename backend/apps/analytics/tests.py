@@ -114,3 +114,30 @@ class AnalyticsEngineTestCase(unittest.TestCase):
         # Проверяем размерность результата
         self.assertEqual(len(batch_res["annual_volatilities"]), 2)
 
+    def test_generate_portfolio_dashboard_returns_valid_png(self):
+        """Проверка, что генератор дашборда возвращает валидные байты PNG."""
+        from datetime import datetime, timedelta
+        from .charts import generate_portfolio_dashboard
+
+        now = datetime.now()
+        dates = [now - timedelta(days=i) for i in range(5, 0, -1)]
+        values = [100000.0, 102000.0, 101500.0, 103000.0, 104500.0]
+        assets = {
+            "shares_amount": 60000.0,
+            "bonds_amount": 25000.0,
+            "etf_amount": 15000.0,
+            "currencies_amount": 4500.0,
+        }
+
+        chart_bytes = generate_portfolio_dashboard(
+            dates=dates,
+            values=values,
+            assets=assets,
+            account_name="Тестовый счет",
+        )
+
+        self.assertIsInstance(chart_bytes, bytes)
+        self.assertGreater(len(chart_bytes), 1000)
+        # Проверка сигнатуры PNG (\x89PNG\r\n\x1a\n)
+        self.assertTrue(chart_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+

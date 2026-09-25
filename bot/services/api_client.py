@@ -188,3 +188,25 @@ class BackendAPIClient:
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.error(f"Сбой подключения к бэкенду (trigger_sync): {exc}")
             return False
+
+    async def get_chart(self, account_id: int | str, telegram_id: int) -> bytes | None:
+        """Скачивает бинарные байты PNG-дашборда из бэкенда."""
+        
+        if str(account_id).lower() == "consolidated":
+            url = f"{self.base_url}/api/v1/analytics/consolidated/chart/"
+            params = {"telegram_id": telegram_id}
+
+        else:
+            url = f"{self.base_url}/api/v1/analytics/{account_id}/chart/"
+            params = {}
+
+        try: 
+            async with self.session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    return await response.read()
+                return None 
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой загрузки графика (get_chart): {exc}")
+            return None
