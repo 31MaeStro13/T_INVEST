@@ -1,0 +1,43 @@
+name: CI / Automated Quality Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Run Django Tests & Health Checks
+    runs-on: ubuntu-latest
+
+    env:
+      DJANGO_SECRET_KEY: "django-insecure-ci-test-key-32chars-minimum-length"
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend,bot"
+      REDIS_URL: "redis://127.0.0.1:6379/0"
+      CELERY_BROKER_URL: "redis://127.0.0.1:6379/0"
+      CELERY_RESULT_BACKEND: "redis://127.0.0.1:6379/0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Django System Check
+        run: uv run python backend/manage.py check
+
+      - name: Run Test Suite (users, portfolio, analytics)
+        run: uv run python backend/manage.py test users portfolio analytics --noinput --verbosity=2
