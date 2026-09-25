@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import load_bot_config
 from bot.handlers import portfolio, start, token
+from bot.keyboards.menu_commands import delete_main_menu_commands
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.services.api_client import BackendAPIClient
 
@@ -43,8 +44,13 @@ async def main():
     # Прокидываем api_client через workflow_data (dependency injection в хэндлеры)
     dp["api_client"] = api_client
 
-    # Подключаем ThrottlingMiddleware (антиспам: не чаще 1 запроса в секунду)
-    dp.message.middleware(ThrottlingMiddleware(rate_limit=1.0))
+    # Подключаем ThrottlingMiddleware (антиспам: не чаще 1 запроса в секунду + теневой бан)
+    throttling_middleware = ThrottlingMiddleware(rate_limit=1.0, ban_threshold=5, ban_time=30.0)
+    dp.message.middleware(throttling_middleware)
+    dp.callback_query.middleware(throttling_middleware)
+
+    # Регистрация хука очистки команд меню на старте
+    dp.startup.register(delete_main_menu_commands)
 
     # Регистрация роутеров
     dp.include_router(start.router)

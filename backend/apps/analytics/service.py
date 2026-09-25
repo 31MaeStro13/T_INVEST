@@ -185,14 +185,46 @@ def get_consolidated_chart(user) -> bytes | None:
     # Для сводной динамики берем снимки всех активных счетов
     active_token = user.broker_tokens.filter(is_active=True).first()
     accounts = user.accounts.filter(broker_token=active_token) if active_token else user.accounts.all()
-    snapshots = (
-        PortfolioSnapshot.objects
-        .filter(account__in=accounts)
-        .order_by("created_at")
-        .values_list("created_at", "total_amount_portfolio")
-    )
-    dates = [s[0] for s in snapshots]
-    values = [float(s[1]) for s in snapshots]
+    account_ids = list(accounts.values_list("id", flat=True))
+
+    first_dates = [
+        PortfolioSnapshot.objects.filter(account_id=aid).order_by("created_at").values_list("created_at", flat=True).first()
+        for aid in account_ids
+    ]
+    first_dates = [d for d in first_dates if d]
+
+    dates = []
+    values = []
+    if first_dates:
+        start_date = max(first_dates)
+        from django.db.models.functions import TruncMinute
+        minutes = (
+            PortfolioSnapshot.objects
+            .filter(account_id__in=account_ids, created_at__gte=start_date)
+            .annotate(minute=TruncMinute("created_at"))
+            .values_list("minute", flat=True)
+            .distinct()
+            .order_by("minute")
+        )
+        for m in minutes:
+            tot = sum(
+                PortfolioSnapshot.objects
+                .filter(account_id=aid, created_at__lte=m.replace(second=59, microsecond=999999))
+                .order_by("-created_at")
+                .values_list("total_amount_portfolio", flat=True)
+                .first() or 0
+                for aid in account_ids
+            )
+            if tot > 0:
+                dates.append(m)
+                values.append(float(tot))
+
+    if not values:
+        from datetime import datetime
+        total_val = float(consolidated_snap.get("total_amount_portfolio") or 0)
+        dates = [datetime.now()]
+        values = [total_val]
+
     chart_bytes = generate_portfolio_dashboard(
         dates=dates,
         values=values,
