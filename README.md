@@ -9,8 +9,10 @@
 [![Matplotlib](https://img.shields.io/badge/Matplotlib-Headless%20Engine-11557c?logo=python&logoColor=white)](https://matplotlib.org/)
 [![Security: Fernet](https://img.shields.io/badge/Security-Fernet%20256--bit-red?logo=lock&logoColor=white)](https://cryptography.io/)
 [![Compliance](https://img.shields.io/badge/Compliance-39--FZ%20Safe%20Harbor-blue?logo=checkmarx&logoColor=white)]()
-[![Tests](https://img.shields.io/badge/Tests-20%20passed%20(0.3s)-brightgreen?logo=pytest&logoColor=white)]()
+[![AI Agent: Agno](https://img.shields.io/badge/AI%20Agent-Agno%20%7C%20Gemini-purple?logo=openai&logoColor=white)](https://github.com/agno-agi/agno)
+[![Tests](https://img.shields.io/badge/Tests-21%20passed%20(0.3s)-brightgreen?logo=pytest&logoColor=white)]()
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
 
 Асинхронный финтех-сервис и Telegram-ассистент инвестора для консолидации капитала, математического аудита рисков и умных уведомлений, работающий напрямую с официальным gRPC API **Т-Банк Инвестиций** (`t-tech-investments`).
 
@@ -169,10 +171,11 @@ docker compose ps
 ## 🗺 Roadmap развития проекта
 
 - [x] **v1.0.0 — Core Fintech Auditor Engine**: Консолидация счетов, NumPy-аналитика, Fernet-шифрование, Matplotlib-дашборды в RAM, Smart Alerts и CI/CD.
-- [ ] **v1.1.0 — AI Financial Explainer (Agno Framework)**:
-  - Интеграция агентского фреймворка [Agno](https://github.com/agno-agi/agno) с подключением локальных или облачных LLM (Groq / OpenAI / Ollama).
-  - Режим **Tool Calling (Function Calling)**: агент использует функции нашего аналитического ядра (`get_portfolio_risk`, `get_asset_allocation`) как тулы для получения точных детерминированных цифр.
-  - Строгие Guardrails: системный промпт с Zero-Recommendation Policy для перевода сложных формул на понятный язык инвестора без нарушения 39-ФЗ.
+- [x] **v1.1.0 — AI Financial Explainer (Agno Framework)**:
+  - Интеграция агентского фреймворка [Agno](https://github.com/agno-agi/agno) с подключением Google Gemini API (`gemini-3.1-flash-lite-preview`).
+  - Режим **Tool Calling (Function Calling)**: агент использует функции нашего аналитического ядра (`get_portfolio_risk_metrics`, `get_asset_allocation`) как инструменты для получения точных детерминированных цифр.
+  - Строгие Guardrails: системный промпт с Zero-Recommendation Policy для перевода сложных формул на понятный язык инвестора без нарушения ст. 6.1 39-ФЗ.
+  - Интерактивный диалоговый режим в Telegram-боте (`AIAuditorState`) без лишнего маркдауна и роботизированных вступлений.
 - [ ] **v1.2.0 — Multi-Broker Integration**: Подключение API Альфа-Инвестиций и Финам для кросс-брокерской консолидации.
 
 ---
@@ -183,6 +186,7 @@ docker compose ps
 |---|---|
 | **Язык & Менеджер пакетов** | Python 3.12+, `uv` (Astral) |
 | **Backend Core** | Django 6.1+, Django REST Framework |
+| **AI & LLM Agents** | Agno Framework 3.x, Google Gemini API, Tool Calling |
 | **Брокер & Очереди** | Redis 8, Celery 5.6+, Celery Beat |
 | **Telegram Bot** | Aiogram 3.x, Aiohttp, FSM, Throttling Middleware |
 | **Финансовая математика** | NumPy 2.x, Decimal |
@@ -190,6 +194,7 @@ docker compose ps
 | **Брокерский API** | `t-tech-investments` (T-Bank Invest gRPC / Protobuf API) |
 | **Безопасность** | `cryptography` (Fernet 256-bit AES), Zero-Trust Header |
 | **CI / DevOps** | GitHub Actions (`astral-sh/setup-uv`), Docker, Docker Compose |
+
 
 ---
 
