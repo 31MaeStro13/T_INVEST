@@ -1,5 +1,8 @@
 # 📊 T-Invest Portfolio Auditor
 
+> 💬 **Связь с разработчиком**: Telegram [@isrhko](https://t.me/isrhko)
+
+[![Developer](https://img.shields.io/badge/Developer-@isrhko-2CA5E0?logo=telegram&logoColor=white)](https://t.me/isrhko)
 [![CI](https://github.com/31MaeStro13/T_INVEST/actions/workflows/ci.yml/badge.svg)](https://github.com/31MaeStro13/T_INVEST/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Django](https://img.shields.io/badge/Django-6.1%2B%20%7C%20DRF-092E20?logo=django&logoColor=white)](https://www.djangoproject.com/)
