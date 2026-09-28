@@ -1,9 +1,10 @@
 from decimal import Decimal
-from django.test import TestCase
-from rest_framework.test import APIClient
-from rest_framework import status
 
-from users.models import InvestorUser, BrokerToken
+from django.test import TestCase
+from rest_framework import status
+from rest_framework.test import APIClient
+from users.models import BrokerToken, InvestorUser
+
 from portfolio.models import Account, PortfolioSnapshot, Position
 from portfolio.services import get_consolidated_snapshot
 

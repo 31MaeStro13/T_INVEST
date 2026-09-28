@@ -1,10 +1,11 @@
 from decimal import Decimal
-from django.db import transaction
-from django.core.cache import cache
 
-from .models import Account, PortfolioSnapshot, Position
+from django.core.cache import cache
+from django.db import transaction
 from t_tech.invest.utils import money_to_decimal, quotation_to_decimal
 from users.models import InvestorUser
+
+from .models import Account, PortfolioSnapshot, Position
 
 _INSTRUMENT_CACHE: dict[str, tuple[str, str]] = {
     "RUB000UTSTOM": ("Рубль РФ (Кэш)", "RUB"),
@@ -64,9 +65,6 @@ def save_portfolio_snapshot(account: Account, portfolio_data, client=None) -> Po
 
         Position.objects.bulk_create(position_to_create)
         return portfoliosnapshot
-
-from users.models import InvestorUser
-from .models import Account
 
 
 def get_consolidated_snapshot(user: InvestorUser, broker_token=None) -> dict | None:

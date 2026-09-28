@@ -1,15 +1,16 @@
+import json
 import logging
 import os
-import json
 import urllib.request
-from celery import shared_task
-import numpy as np
-from django.core.cache import cache
 
-from users.models import InvestorUser
+import numpy as np
+from celery import shared_task
+from django.core.cache import cache
 from portfolio.models import Account, PortfolioSnapshot
-from .batch import compute_batch_metrics
+from users.models import InvestorUser
+
 from .alerts import evaluate_risk_triggers
+from .batch import compute_batch_metrics
 from .service import get_consolidated_analytics
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ def nightly_batch_risk_audit(chunk_size: int = 100) -> dict[str, int]:
     """
     user_ids = list(InvestorUser.objects.values_list("id", flat=True))
     total_users = len(user_ids)
-    
+
     if not total_users:
         return {"total_users": 0, "chunks_dispatched": 0}
 

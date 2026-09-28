@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 
 import matplotlib
+
 # 1. Принудительный headless-бэкенд для серверов без GUI (до импорта pyplot)
 matplotlib.use("Agg")
 import matplotlib.dates as mdates

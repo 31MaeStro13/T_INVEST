@@ -1,4 +1,5 @@
 import unittest
+
 from .engine import (
     annual_volatility,
     compute_all,
@@ -94,6 +95,7 @@ class AnalyticsEngineTestCase(unittest.TestCase):
     def test_compute_batch_metrics_equivalence(self):
         """Проверка численной эквивалентности 2D матричного батчинга и 1D ядра."""
         import numpy as np
+
         from .batch import compute_batch_metrics
 
         p1 = [100.0, 105.0, 95.0, 102.0]
@@ -117,6 +119,7 @@ class AnalyticsEngineTestCase(unittest.TestCase):
     def test_generate_portfolio_dashboard_returns_valid_png(self):
         """Проверка, что генератор дашборда возвращает валидные байты PNG."""
         from datetime import datetime, timedelta
+
         from .charts import generate_portfolio_dashboard
 
         now = datetime.now()
@@ -167,10 +170,11 @@ class AnalyticsEngineTestCase(unittest.TestCase):
     def test_ask_ai_auditor_endpoint_success(self):
         """Проверка эндпоинта /api/v1/analytics/ask_ai/ с моком LLM."""
         from unittest.mock import patch
-        from users.models import InvestorUser
-        from rest_framework.test import APIClient
 
-        user = InvestorUser.objects.create(telegram_id=999888777)
+        from rest_framework.test import APIClient
+        from users.models import InvestorUser
+
+        InvestorUser.objects.create(telegram_id=999888777)
         client = APIClient()
 
         with patch("analytics.views.ask_auditor", return_value="Аудит: риски в норме."):

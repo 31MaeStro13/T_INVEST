@@ -1,15 +1,15 @@
 import logging
+
+from portfolio.tasks import sync_user_portfolio
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from portfolio.tasks import sync_user_portfolio
-from .models import InvestorUser, BrokerToken
+from .models import BrokerToken, InvestorUser
 from .serializers import (
+    BrokerTokenSerializer,
     SetTokenSerializer,
     TriggerSyncSerializer,
-    BrokerTokenSerializer,
-    SetActiveAccountSerializer,
 )
 
 logger = logging.getLogger(__name__)

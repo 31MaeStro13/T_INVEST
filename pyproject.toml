@@ -46,8 +46,23 @@ t-tech-investments = { index = "tbank" }
 [dependency-groups]
 dev = [
     "locust>=2.46.6",
+    "ruff>=0.16.9",
 ]
 
 [tool.uv]
 allow-insecure-host = ["opensource.tbank.ru"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = [
+    "**/migrations/*",
+    ".venv",
+    "build",
+    "docs",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "RUF012"]
 

@@ -1,11 +1,12 @@
 from django.urls import path
+
 from .views import (
+    ActivateTokenView,
     SetUserTokenView,
+    ToggleAlertsView,
+    TokensListView,
     TriggerSyncView,
     UserStatusView,
-    TokensListView,
-    ActivateTokenView,
-    ToggleAlertsView,
 )
 
 urlpatterns = [

@@ -1,9 +1,8 @@
-from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-
 from users.models import InvestorUser
+
 from .models import Account
 from .serializers import AccountSerializer, PortfolioSnapshotSerializer
 

@@ -4,9 +4,10 @@ Django-слой аналитики: достаём данные из БД и в�
 
 from __future__ import annotations
 
-from portfolio.models import Account, PortfolioSnapshot
-from . import engine
 from django.core.cache import cache
+from portfolio.models import Account, PortfolioSnapshot
+
+from . import engine
 from .charts import generate_portfolio_dashboard
 
 
@@ -70,8 +71,8 @@ def get_consolidated_analytics(user, days: int = 90, risk_free_rate: float = 0.1
     if cached_res:
         return cached_res
 
-    from portfolio.services import get_consolidated_snapshot
     from portfolio.models import Account, PortfolioSnapshot
+    from portfolio.services import get_consolidated_snapshot
 
     accounts = Account.objects.filter(investor=user)
     if user.active_broker_token:

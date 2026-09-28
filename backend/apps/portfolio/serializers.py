@@ -1,5 +1,7 @@
 from rest_framework import serializers
+
 from .models import Account, PortfolioSnapshot, Position
+
 
 class AccountSerializer(serializers.ModelSerializer):
     is_active = serializers.SerializerMethodField()

@@ -1,13 +1,16 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-
-from users.models import InvestorUser
-from .service import get_analytics_for_account, get_consolidated_analytics
 from django.http import HttpResponse
-from .service import get_chart_for_account, get_consolidated_chart
-from .agent import ask_auditor
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from users.models import InvestorUser
 
+from .agent import ask_auditor
+from .service import (
+    get_analytics_for_account,
+    get_chart_for_account,
+    get_consolidated_analytics,
+    get_consolidated_chart,
+)
 
 
 class ConsolidatedAnalyticsView(APIView):

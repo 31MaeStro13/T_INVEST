@@ -1,10 +1,11 @@
 from django.urls import path
+
 from .views import (
     AccountAnalyticsView,
-    ConsolidatedAnalyticsView,
     AccountChartView,
-    ConsolidatedChartView,
     AskAIAuditorView,
+    ConsolidatedAnalyticsView,
+    ConsolidatedChartView,
 )
 
 urlpatterns = [

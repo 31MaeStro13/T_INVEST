@@ -3,13 +3,13 @@ AI-агент финансового аудита на базе фреймвор
 Реализует паттерн Tool Calling (Function Calling) поверх аналитического ядра NumPy.
 Строго соответствует ст. 6.1 Федерального закона № 39-ФЗ (Zero-Recommendation Policy).
 """
-import os
 import logging
+import os
 from typing import Any
-from dotenv import load_dotenv
 
 from agno.agent import Agent
 from agno.models.google import Gemini
+from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -21,7 +21,8 @@ def _detect_proxy() -> str | None:
 
     # Внутри Docker 127.0.0.1 хоста доступен через IP шлюза контейнера
     if os.path.exists("/.dockerenv"):
-        import socket, struct
+        import socket
+        import struct
         try:
             with open("/proc/net/route") as f:
                 for line in f:
@@ -49,9 +50,10 @@ def make_portfolio_tools(telegram_id: int):
     Фабрика инструментов (Tools) для Agno.
     Замыкает telegram_id пользователя, чтобы агент не запрашивал ID у пользователя.
     """
-    from users.models import InvestorUser
-    from analytics.service import get_consolidated_analytics
     from portfolio.services import get_consolidated_snapshot
+    from users.models import InvestorUser
+
+    from analytics.service import get_consolidated_analytics
 
     def get_portfolio_risk_metrics() -> dict[str, Any]:
         """

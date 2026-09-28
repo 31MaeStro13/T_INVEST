@@ -1,6 +1,6 @@
-from django.db import models
-from django.conf import settings
 from cryptography.fernet import Fernet
+from django.conf import settings
+from django.db import models
 
 # Create your models here.
 
@@ -33,7 +33,7 @@ class InvestorUser(models.Model):
         cipher = self._get_cipher()
         encrypted_bytes = cipher.encrypt(raw_token.encode("utf-8"))
         self.encrypted_token = encrypted_bytes.decode("utf-8")
-    
+
     @property
     def active_broker_token(self):
         return self.broker_tokens.filter(is_active=True).first()

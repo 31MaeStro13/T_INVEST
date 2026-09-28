@@ -27,7 +27,7 @@ class Account(models.Model):
     name = models.CharField(max_length=128)
 
     account_type = models.CharField(
-        max_length=64, 
+        max_length=64,
         blank=True
     )
 
@@ -42,49 +42,49 @@ class Account(models.Model):
 class PortfolioSnapshot(models.Model):
 
     account = models.ForeignKey(
-        Account, 
+        Account,
         on_delete=models.CASCADE,
         related_name="snapshots"
     )
 
     created_at = models.DateTimeField(
         auto_now_add=True,
-        db_index=True 
+        db_index=True
     )
 
     total_amount_portfolio = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
     )
 
     total_amount_shares = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
-    )  
-     
+    )
+
     total_amount_bonds = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
     )
 
     total_amount_etf = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
     )
 
     total_amount_currencies = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
     )
 
     expected_yield = models.DecimalField(
         max_digits=18,
-        decimal_places=4, 
+        decimal_places=4,
         default=0
     )
 
@@ -116,23 +116,23 @@ class Position(models.Model):
     )
 
     quantity = models.DecimalField(
-        max_digits=18, 
+        max_digits=18,
         decimal_places=4
     )
 
     current_price = models.DecimalField(
-        max_digits=18, 
+        max_digits=18,
         decimal_places=4
     )
 
     average_position_price = models.DecimalField(
-        max_digits=18, 
+        max_digits=18,
         decimal_places=4,
-        null=True, 
+        null=True,
         blank=True
     )
 
     expected_yield = models.DecimalField(
-        max_digits=18, 
+        max_digits=18,
         decimal_places=4
     )
