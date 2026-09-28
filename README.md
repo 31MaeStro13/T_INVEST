@@ -50,12 +50,15 @@
 ```mermaid
 flowchart TD
     User([Telegram User]) <-->|Интерактивный UI / Inline кнопки| Bot[Telegram Bot\nAiogram 3.x]
+    Client([HTTP / API Clients]) -->|REST API Requests| Nginx[Nginx Reverse-Proxy\nGzip + Static Cache + Buffering]
     
     subgraph Core Infrastructure [Docker Compose]
-        Bot <-->|Асинхронный REST API\naiohttp client + X-Bot-Secret| API[Django REST API\nBackend Core]
+        Bot <-->|Асинхронный REST API\naiohttp + X-Bot-Secret| Nginx
+        Nginx <-->|Unix / TCP Sockets\nBacklog 2048| Gunicorn[Gunicorn WSGI Server\n4 Workers + gthread Pool]
+        Gunicorn <-->|Django REST API\nBackend Core| API[Django Services Layer]
         
         API <-->|Симметричное Fernet AES-256| DB[(PostgreSQL / SQLite\nDatabase)]
-        API <-->|Кэш дашбордов + Дедупликация| Redis[(Redis Broker & Cache)]
+        API <-->|Redis Cache-Aside\nTTL 300s + Дедупликация| Redis[(Redis Broker & Cache)]
         
         Beat[Celery Beat\nПланировщик задач] -->|Синхронизация + Аудит рисков| Redis
         Redis <-->|Фоновые воркеры| Worker[Celery Worker\nФоновые задачи]
@@ -113,7 +116,29 @@ flowchart TD
 * **Двухуровневый антиспам (Throttling Middleware)**:
   * Всплывающий нативный тост Telegram при частом нажатии кнопок.
   * Теневой бан (Silent Drop) на 30 секунд при превышении лимита >5 кликов за 3 секунды.
-* **Постраничная пагинация**: портфели из 50+ активов отображаются постранично по 5 позиций.
+### 8. Production-Grade Инфраструктура (Nginx + Gunicorn WSGI)
+* **Буферизация и сжатие**: Nginx выступает в роли reverse-proxy, сжимая JSON-ответы через Gzip (уменьшение сетевого трафика в 3 раза) и раздавая статические файлы напрямую из кэша.
+* **Параллельная обработка**: Gunicorn 26.x с 4 воркерами и пулом потоков `gthread` параллелит выполнение запросов на всех ядрах CPU. Очередь `backlog 2048` предотвращает сбросы соединений при шквальном трафике.
+
+---
+
+## 📈 Нагрузочное тестирование и Highload-оптимизация (Locust Benchmark)
+
+Система прошла полный цикл нагрузочного и стресс-тестирования через **Locust 2.46** на реальном профиле пользователя (6 счетов, 792 позиции, NumPy-аналитика):
+
+| Метрика | До оптимизации (Без кэша) | После Redis Cache-Aside | Стресс-тест Gunicorn (1 000 клиентов) |
+|---|:---:|:---:|:---:|
+| **Медиана задержки (p50)** | 81 мс (пики до 580 мс) | **6 мс** (пики до 4 мс) | **1 400 мс** |
+| **95-й перцентиль (p95)** | 740 мс (пики до 1 100 мс) | **27 мс** (пики до 24 мс) | **2 000 мс** |
+| **Пропускная способность** | 48 req/s | **87 req/s** | **⚡ 563.3 req/s (16 892 req / 30s)** |
+| **Доля ошибок (% Fails)** | 0.00% | **0.00%** | **0.00% (Zero Drops)** |
+
+<p align="center">
+  <img src="docs/assets/load_test_latency_comparison.png" width="48%" />
+  <img src="docs/assets/load_test_stress_limits.png" width="48%" />
+</p>
+
+> 📄 **Полный технический отчет:** Детальные перцентили, анализ точек отказа и методология описаны в [`docs/LOAD_TESTING_REPORT.md`](docs/LOAD_TESTING_REPORT.md).
 
 ---
 
@@ -179,7 +204,12 @@ docker compose ps
   - Режим **Tool Calling (Function Calling)**: агент использует функции нашего аналитического ядра (`get_portfolio_risk_metrics`, `get_asset_allocation`) как инструменты для получения точных детерминированных цифр.
   - Строгие Guardrails: системный промпт с Zero-Recommendation Policy для перевода сложных формул на понятный язык инвестора без нарушения ст. 6.1 39-ФЗ.
   - Интерактивный диалоговый режим в Telegram-боте (`AIAuditorState`) без лишнего маркдауна и роботизированных вступлений.
-- [ ] **v1.2.0 — Multi-Broker Integration**: Подключение API Альфа-Инвестиций и Финам для кросс-брокерской консолидации.
+- [x] **v1.2.0 — Highload & Production Infrastructure**:
+  - Внедрение паттерна **Redis Cache-Aside** (ускорение тяжелых вычислений в 145 раз).
+  - Миграция на **Gunicorn WSGI (4 воркера + gthread)** и **Nginx Reverse-Proxy** (Gzip сжатие, кэш статики).
+  - Комплексный стресс-тест в **Locust**: подтвержденная пропускная способность **563 RPS (16 892 запроса за 30с) с 0% ошибок** под нагрузкой 1 000 клиентов без пауз.
+  - Настройка автоматического CI/CD (GitHub Actions) с линтером **Ruff** и тестовым раннером.
+- [ ] **v1.3.0 — Multi-Broker Integration**: Подключение API Альфа-Инвестиций и Финам для кросс-брокерской консолидации.
 
 ---
 
@@ -189,6 +219,7 @@ docker compose ps
 |---|---|
 | **Язык & Менеджер пакетов** | Python 3.12+, `uv` (Astral) |
 | **Backend Core** | Django 6.1+, Django REST Framework |
+| **WSGI & Reverse-Proxy** | Gunicorn 26.x (`gthread`, backlog 2048), Nginx Alpine (Gzip, Static) |
 | **AI & LLM Agents** | Agno Framework 3.x, Google Gemini API, Tool Calling |
 | **Брокер & Очереди** | Redis 8, Celery 5.6+, Celery Beat |
 | **Telegram Bot** | Aiogram 3.x, Aiohttp, FSM, Throttling Middleware |
@@ -196,6 +227,7 @@ docker compose ps
 | **Визуализация** | Matplotlib 3.11+ (Headless Agg, BytesIO) |
 | **Брокерский API** | `t-tech-investments` (T-Bank Invest gRPC / Protobuf API) |
 | **Безопасность** | `cryptography` (Fernet 256-bit AES), Zero-Trust Header |
+| **Нагрузочные тесты & Качество** | Locust 2.46+ (Headless), Ruff 0.16+, Django Test Runner (21 тестов) |
 | **CI / DevOps** | GitHub Actions (`astral-sh/setup-uv`), Docker, Docker Compose |
 
 
