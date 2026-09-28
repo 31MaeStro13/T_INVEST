@@ -69,3 +69,23 @@ class UserApiTests(TestCase):
         self.assertTrue(response.data["exists"])
         self.assertTrue(response.data["has_token"])
         self.assertEqual(response.data["active_token_name"], "Основной")
+        self.assertEqual(response.data["user_type"], "retail")
+
+    def test_set_user_type_toggle(self):
+        """Проверка переключения роли (retail -> pro -> retail)."""
+        user = InvestorUser.objects.create(telegram_id=12345678)
+        self.assertEqual(user.user_type, "retail")
+
+        # Переключаем retail -> pro
+        res1 = self.client.post("/api/v1/users/set_type/", {"telegram_id": 12345678}, format="json")
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(res1.data["user_type"], "pro")
+        user.refresh_from_db()
+        self.assertEqual(user.user_type, "pro")
+
+        # Переключаем pro -> retail
+        res2 = self.client.post("/api/v1/users/set_type/", {"telegram_id": 12345678}, format="json")
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data["user_type"], "retail")
+        user.refresh_from_db()
+        self.assertEqual(user.user_type, "retail")

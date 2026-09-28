@@ -32,6 +32,8 @@ class UserStatusView(APIView):
                 {
                     "exists": False,
                     "has_token": False,
+                    "user_type": "retail",
+                    "user_type_display": "Частный инвестор",
                     "accounts_count": 0,
                     "active_account_id": None,
                     "active_account_name": None,
@@ -50,6 +52,8 @@ class UserStatusView(APIView):
             {
                 "exists": True,
                 "has_token": has_token,
+                "user_type": user.user_type,
+                "user_type_display": user.get_user_type_display(),
                 "accounts_count": user.accounts.count(),
                 "active_account_id": active_acc.id if active_acc else None,
                 "active_account_name": active_acc.name if active_acc else None,
@@ -57,6 +61,56 @@ class UserStatusView(APIView):
                 "active_token_name": active_tok.name if active_tok else None,
                 "tokens_count": user.broker_tokens.count(),
                 "alerts_enabled": user.alerts_enabled,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SetUserTypeView(APIView):
+    """POST /api/v1/users/set_type/ — переключение роли инвестора (retail / pro)."""
+
+    def post(self, request):
+        tg_id = request.data.get("telegram_id")
+        user_type = request.data.get("user_type")
+
+        if not tg_id:
+            return Response(
+                {"detail": "Параметр telegram_id обязателен"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = InvestorUser.objects.filter(telegram_id=tg_id).first()
+        if not user:
+            return Response(
+                {"detail": "Пользователь не найден"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if user_type:
+            if user_type not in (InvestorUser.USER_TYPE_RETAIL, InvestorUser.USER_TYPE_PRO):
+                return Response(
+                    {
+                        "detail": f"Недопустимый user_type. Разрешены: {InvestorUser.USER_TYPE_RETAIL}, {InvestorUser.USER_TYPE_PRO}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.user_type = user_type
+        else:
+            user.user_type = (
+                InvestorUser.USER_TYPE_PRO
+                if user.user_type == InvestorUser.USER_TYPE_RETAIL
+                else InvestorUser.USER_TYPE_RETAIL
+            )
+
+        user.save(update_fields=["user_type"])
+        logger.info(f"Пользователь {user.telegram_id} сменил роль на {user.user_type}")
+
+        return Response(
+            {
+                "status": "ok",
+                "telegram_id": user.telegram_id,
+                "user_type": user.user_type,
+                "user_type_display": user.get_user_type_display(),
             },
             status=status.HTTP_200_OK,
         )

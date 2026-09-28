@@ -22,6 +22,21 @@ class InvestorUser(models.Model):
         related_name="+",
     )
 
+    USER_TYPE_RETAIL = "retail"
+    USER_TYPE_PRO = "pro"
+    USER_TYPE_CHOICES = [
+        (USER_TYPE_RETAIL, "Частный инвестор"),
+        (USER_TYPE_PRO, "Бизнес / Профессионал"),
+    ]
+
+    user_type = models.CharField(
+        max_length=20,
+        choices=USER_TYPE_CHOICES,
+        default=USER_TYPE_RETAIL,
+        verbose_name="Тип инвестора",
+        help_text="retail - частный инвестор, pro - бизнес / профессиональный инвестор",
+    )
+
     alerts_enabled = models.BooleanField(
         default=True,
         verbose_name="Включены ли риск-алерты",
