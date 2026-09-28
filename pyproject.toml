@@ -42,6 +42,11 @@ explicit = true
 [tool.uv.sources]
 t-tech-investments = { index = "tbank" }
 
+[dependency-groups]
+dev = [
+    "locust>=2.46.6",
+]
+
 [tool.uv]
 allow-insecure-host = ["opensource.tbank.ru"]
 

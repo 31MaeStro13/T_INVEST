@@ -1,0 +1,6 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,/api/v1/accounts/[id]/latest_snapshot/,HTTPError('500 Server Error: Internal Server Error for url: /api/v1/accounts/[id]/latest_snapshot/'),314,2026-09-28T13:15:32Z,2026-09-28T13:15:49Z
+GET,/api/v1/accounts/consolidated_snapshot/,HTTPError('500 Server Error: Internal Server Error for url: /api/v1/accounts/consolidated_snapshot/'),314,2026-09-28T13:15:32Z,2026-09-28T13:15:49Z
+GET,/api/v1/analytics/consolidated/chart/,HTTPError('500 Server Error: Internal Server Error for url: /api/v1/analytics/consolidated/chart/'),126,2026-09-28T13:15:32Z,2026-09-28T13:15:49Z
+GET,/api/v1/accounts/,HTTPError('500 Server Error: Internal Server Error for url: /api/v1/accounts/'),429,2026-09-28T13:15:32Z,2026-09-28T13:15:49Z
+GET,/api/v1/analytics/consolidated/,HTTPError('500 Server Error: Internal Server Error for url: /api/v1/analytics/consolidated/'),179,2026-09-28T13:15:32Z,2026-09-28T13:15:49Z

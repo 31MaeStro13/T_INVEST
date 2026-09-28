@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.db import transaction
+from django.core.cache import cache
 
 from .models import Account, PortfolioSnapshot, Position
 from t_tech.invest.utils import money_to_decimal, quotation_to_decimal
@@ -69,6 +70,13 @@ from .models import Account
 
 
 def get_consolidated_snapshot(user: InvestorUser, broker_token=None) -> dict | None:
+    token_obj = broker_token or user.active_broker_token
+    token_id = token_obj.id if token_obj else "all"
+    cache_key = f"snapshot:consolidated:{user.id}:{token_id}"
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return cached_data
+
     # 1. Находим все счета пользователя (для активного токена)
     accounts = Account.objects.filter(investor=user)
     if broker_token:
@@ -169,7 +177,7 @@ def get_consolidated_snapshot(user: InvestorUser, broker_token=None) -> dict | N
 
     # 6. Возвращаем единый агрегированный снимок
     latest_date = max((s.created_at for s in snapshots), default=None)
-    return {
+    result = {
         "id": "consolidated",
         "account_name": "Все счета Т-Банка",
         "created_at": latest_date.isoformat() if latest_date else "",
@@ -181,3 +189,5 @@ def get_consolidated_snapshot(user: InvestorUser, broker_token=None) -> dict | N
         "expected_yield": str(total_yield),
         "positions": consolidated_positions,
     }
+    cache.set(cache_key, result, timeout=300)
+    return result

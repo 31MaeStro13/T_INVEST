@@ -20,6 +20,11 @@ def get_analytics_for_account(account_id: int, days: int = 90, risk_free_rate: f
 
     Возвращает None если счёт не найден.
     """
+    cache_key = f"analytics:account:{account_id}:{days}"
+    cached_res = cache.get(cache_key)
+    if cached_res:
+        return cached_res
+
     try:
         account = Account.objects.get(pk=account_id)
     except Account.DoesNotExist:
@@ -51,6 +56,7 @@ def get_analytics_for_account(account_id: int, days: int = 90, risk_free_rate: f
     result["account_id"] = account_id
     result["account_name"] = account.name
 
+    cache.set(cache_key, result, timeout=300)
     return result
 
 
@@ -58,6 +64,12 @@ def get_consolidated_analytics(user, days: int = 90, risk_free_rate: float = 0.1
     """
     Возвращает консолидированный аналитический отчёт по всем счетам пользователя (для активного токена).
     """
+    token_id = getattr(user.active_broker_token, "id", "all")
+    cache_key = f"analytics:consolidated:{user.id}:{token_id}:{days}"
+    cached_res = cache.get(cache_key)
+    if cached_res:
+        return cached_res
+
     from portfolio.services import get_consolidated_snapshot
     from portfolio.models import Account, PortfolioSnapshot
 
@@ -122,6 +134,7 @@ def get_consolidated_analytics(user, days: int = 90, risk_free_rate: float = 0.1
     result["account_id"] = "consolidated"
     result["account_name"] = "Все счета Т-Банка (Консолидировано)"
 
+    cache.set(cache_key, result, timeout=300)
     return result
 
 def get_chart_for_account(account_id: int) -> bytes | None:
