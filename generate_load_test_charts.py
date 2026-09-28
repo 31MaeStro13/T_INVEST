@@ -76,31 +76,32 @@ def plot_before_after():
 
 
 def plot_stress_limits():
-    """Стресс-тестирование: Пропускная способность (RPS) и точка отказа (Breaking Point)."""
+    """Стресс-тестирование: Dev-сервер vs Продакшн Gunicorn (1000 клиентов)."""
     stages = [
         "100 Users\n(Штатный трафик)",
-        "500 Users\n(Шквал без пауз)",
-        "1 000 Users\n(Предел соединений)",
+        "500 Users\n(Шквал DevServer)",
+        "1 000 Users\n(DevServer: Сбой)",
+        "1 000 Users\n(Gunicorn 4W: Успех)",
     ]
 
-    rps = [86.7, 173.0, 117.3]
-    error_rate = [0.0, 0.0, 41.01]
+    rps = [86.7, 173.0, 117.3, 563.3]
+    error_rate = [0.0, 0.0, 41.01, 0.0]
 
-    fig, ax1 = plt.subplots(figsize=(10, 5.5))
+    fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    color = "#2980b9"
-    ax1.set_xlabel("Профиль нагрузки", fontweight="bold", labelpad=10)
-    ax1.set_ylabel("Пропускная способность (RPS, Запросов/сек)", color=color, fontweight="bold")
-    bars = ax1.bar(stages, rps, color=color, width=0.45, alpha=0.8, label="RPS (Запросов/сек)")
-    ax1.tick_params(axis="y", labelcolor=color)
-    ax1.set_ylim(0, 220)
+    colors = ["#2980b9", "#2980b9", "#7f8c8d", "#27ae60"]
+    ax1.set_xlabel("Архитектурная конфигурация и нагрузка", fontweight="bold", labelpad=10)
+    ax1.set_ylabel("Пропускная способность (RPS, Запросов/сек)", color="#2c3e50", fontweight="bold")
+    bars = ax1.bar(stages, rps, color=colors, width=0.45, alpha=0.85, label="RPS (Запросов/сек)")
+    ax1.tick_params(axis="y", labelcolor="#2c3e50")
+    ax1.set_ylim(0, 680)
 
     for bar in bars:
         h = bar.get_height()
         ax1.annotate(f"{h:.1f} req/s",
                      (bar.get_x() + bar.get_width() / 2, h),
-                     textcoords="offset points", xytext=(0, 5),
-                     ha="center", fontweight="bold", color=color)
+                     textcoords="offset points", xytext=(0, 6),
+                     ha="center", fontweight="bold", color="#2c3e50", fontsize=10)
 
     # Вторая ось Y для % ошибок
     ax2 = ax1.twinx()
@@ -108,16 +109,17 @@ def plot_stress_limits():
     ax2.set_ylabel("Доля ошибок (% Fails)", color=color2, fontweight="bold")
     line = ax2.plot(stages, error_rate, color=color2, marker="o", linewidth=3, markersize=8, label="% Ошибок")
     ax2.tick_params(axis="y", labelcolor=color2)
-    ax2.set_ylim(-2, 50)
+    ax2.set_ylim(-3, 55)
 
-    for i, txt in enumerate(error_rate):
-        status = "0% (OK)" if txt == 0 else f"{txt:.1f}% (Broken Pipe limit)"
-        ax2.annotate(status,
+    annotations = ["0% (OK)", "0% (OK)", "41.0% (Broken Pipe)", "0.0% (Решено!)"]
+    for i, txt in enumerate(annotations):
+        c = "#c0392b" if "Broken" in txt else "#27ae60"
+        ax2.annotate(txt,
                      (stages[i], error_rate[i]),
                      textcoords="offset points", xytext=(0, 10),
-                     ha="center", fontweight="bold", color=color2)
+                     ha="center", fontweight="bold", color=c)
 
-    plt.title("T-Invest Portfolio Auditor: Стресс-тест и поиск точки отказа (Breaking Point)", fontweight="bold", pad=15)
+    plt.title("Эволюция масштабируемости: DevServer (Broken Pipe) -> Gunicorn 4 Workers (563 RPS, 0% Fails)", fontweight="bold", pad=15)
     plt.tight_layout()
     plt.savefig("docs/assets/load_test_stress_limits.png", dpi=300, bbox_inches="tight")
     plt.close()
