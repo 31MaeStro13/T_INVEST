@@ -1,12 +1,15 @@
+
 import logging
 
 from celery import shared_task
 from django.core.cache import cache
+from django.db import transaction
+from django.utils import timezone
 from t_tech.invest import Client
 from t_tech.invest.exceptions import RequestError
 from users.models import InvestorUser
 
-from .models import Account
+from .models import Account, PortfolioSnapshot
 from .services import save_portfolio_snapshot
 
 logger = logging.getLogger(__name__)
@@ -89,17 +92,139 @@ def sync_user_portfolio(self, user_id: int):
             raise
 
 
+
 @shared_task
 def sync_portfolios():
     """
     Диспетчер для Celery Beat.
     Раз в час находит всех пользователей с токенами и ставит каждому отдельную задачу.
     """
-    user_ids = InvestorUser.objects.exclude(encrypted_token="").values_list('id', flat=True).iterator(chunk_size=2000)
+    # values_list возвращает int, а не объект — баг исправлен: user.id → user
+    user_ids = (
+        InvestorUser.objects
+        .exclude(encrypted_token="")
+        .values_list("id", flat=True)
+        .iterator(chunk_size=2000)
+    )
     count = 0
-    for user in user_ids:
-        sync_user_portfolio.delay(user.id)
+    for user_id in user_ids:
+        sync_user_portfolio.delay(user_id)
         count += 1
 
     logger.info(f"📢 Диспетчер запланировал синхронизацию для {count} инвесторов.")
-# не я написал
+
+
+@shared_task
+def downsample_snapshots():
+    """
+    Прореживание истории снимков (Downsampling / Rollup).
+    Запускается раз в сутки в 02:00 по расписанию Celery Beat.
+
+    Политика хранения:
+      0–7 дней   → оставляем все снимки (детальная история).
+      7–90 дней  → 1 снимок в сутки (последний за день).
+      90–365 дней → 1 снимок в неделю (последний в воскресенье или ближайший).
+      > 365 дней → удаляем все.
+    """
+    now = timezone.now()
+    boundary_7d = now - timezone.timedelta(days=7)
+    boundary_90d = now - timezone.timedelta(days=90)
+    boundary_365d = now - timezone.timedelta(days=365)
+
+    total_deleted = 0
+    accounts = Account.objects.all().values_list("id", flat=True)
+
+    for account_id in accounts:
+        with transaction.atomic():
+            # ── Зона 3: старше 365 дней — удалить всё ────────────────────────
+            deleted_old, _ = (
+                PortfolioSnapshot.objects
+                .filter(account_id=account_id, created_at__lt=boundary_365d)
+                .delete()
+            )
+            total_deleted += deleted_old
+
+            # ── Зона 2: 90–365 дней — 1 снимок в неделю ─────────────────────
+            snapshots_90_365 = list(
+                PortfolioSnapshot.objects
+                .filter(
+                    account_id=account_id,
+                    created_at__gte=boundary_365d,
+                    created_at__lt=boundary_90d,
+                )
+                .order_by("created_at")
+                .values_list("id", "created_at")
+            )
+            keep_ids = _pick_weekly(snapshots_90_365)
+            deleted_w, _ = (
+                PortfolioSnapshot.objects
+                .filter(account_id=account_id)
+                .filter(
+                    created_at__gte=boundary_365d,
+                    created_at__lt=boundary_90d,
+                )
+                .exclude(id__in=keep_ids)
+                .delete()
+            )
+            total_deleted += deleted_w
+
+            # ── Зона 1: 7–90 дней — 1 снимок в сутки ────────────────────────
+            snapshots_7_90 = list(
+                PortfolioSnapshot.objects
+                .filter(
+                    account_id=account_id,
+                    created_at__gte=boundary_90d,
+                    created_at__lt=boundary_7d,
+                )
+                .order_by("created_at")
+                .values_list("id", "created_at")
+            )
+            keep_ids_daily = _pick_daily(snapshots_7_90)
+            deleted_d, _ = (
+                PortfolioSnapshot.objects
+                .filter(account_id=account_id)
+                .filter(
+                    created_at__gte=boundary_90d,
+                    created_at__lt=boundary_7d,
+                )
+                .exclude(id__in=keep_ids_daily)
+                .delete()
+            )
+            total_deleted += deleted_d
+
+    logger.info(
+        f"📊 Downsampling завершён: удалено {total_deleted} устаревших снимков "
+        f"для {len(list(accounts))} счетов."
+    )
+    return total_deleted
+
+
+# ── Вспомогательные функции прореживания ────────────────────────────────────
+
+def _pick_daily(snapshots: list[tuple]) -> list[int]:
+    """
+    Из списка (id, created_at) выбирает один снимок на каждые сутки —
+    самый поздний за день (ближе к 23:59).
+    Возвращает список id, которые надо ОСТАВИТЬ.
+    """
+    best: dict[tuple, tuple[int, object]] = {}
+    for snap_id, created_at in snapshots:
+        day_key = (created_at.year, created_at.month, created_at.day)
+        if day_key not in best or created_at > best[day_key][1]:
+            best[day_key] = (snap_id, created_at)
+    return [v[0] for v in best.values()]
+
+
+def _pick_weekly(snapshots: list[tuple]) -> list[int]:
+    """
+    Из списка (id, created_at) выбирает один снимок на каждую ISO-неделю —
+    самый поздний за неделю.
+    Возвращает список id, которые надо ОСТАВИТЬ.
+    """
+    best: dict[tuple, tuple[int, object]] = {}
+    for snap_id, created_at in snapshots:
+        iso_cal = created_at.isocalendar()
+        week_key = (iso_cal[0], iso_cal[1])  # (iso_year, iso_week)
+        if week_key not in best or created_at > best[week_key][1]:
+            best[week_key] = (snap_id, created_at)
+    return [v[0] for v in best.values()]

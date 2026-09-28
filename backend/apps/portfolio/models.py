@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Index
 
 # Create your models here.
 
@@ -87,6 +88,16 @@ class PortfolioSnapshot(models.Model):
         decimal_places=4,
         default=0
     )
+
+    # Флаг: True — позиции у этого снимка уже были удалены прореживателем,
+    # чтобы не дублировать DELETE-запросы при повторном запуске задачи.
+    positions_pruned = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            # Ускоряет выборку последних снимков по аккаунту
+            Index(fields=["account", "-created_at"], name="ps_account_created_idx"),
+        ]
 
 class Position(models.Model):
 

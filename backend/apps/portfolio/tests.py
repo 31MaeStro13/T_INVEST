@@ -182,3 +182,169 @@ class ExcelBrokerReportParserTests(TestCase):
         self.assertIn("detail", response.data)
 
 
+class DataRetentionTests(TestCase):
+    """
+    Тестирование Блока 2 — оптимизация и контроль роста БД.
+    Покрывает Position Pruning и логику Downsampling (pick_daily / pick_weekly).
+    """
+
+    def setUp(self):
+        self.user = InvestorUser.objects.create(telegram_id=777000111)
+        self.account = Account.objects.create(
+            investor=self.user,
+            account_id="retention_acc",
+            name="Тестовый счёт",
+        )
+
+    def _make_snapshot(self, **kwargs) -> PortfolioSnapshot:
+        """Вспомогательный метод: создаёт снимок напрямую (минуя save_portfolio_snapshot)."""
+        return PortfolioSnapshot.objects.create(account=self.account, **kwargs)
+
+    def _add_positions(self, snapshot: PortfolioSnapshot, count: int = 3):
+        """Добавляет <count> позиций к снимку."""
+        Position.objects.bulk_create([
+            Position(
+                snapshot=snapshot,
+                figi=f"FIGI{i}",
+                ticker=f"TCK{i}",
+                instrument_type="share",
+                quantity=Decimal("10"),
+                current_price=Decimal("100"),
+                expected_yield=Decimal("5"),
+            )
+            for i in range(count)
+        ])
+
+    # ── 2.1 Position Pruning ─────────────────────────────────────────────────
+
+    def test_pruning_deletes_old_positions_on_new_snapshot(self):
+        """
+        После сохранения нового снимка через save_portfolio_snapshot,
+        позиции у всех предыдущих снимков должны быть удалены.
+        """
+        from unittest.mock import MagicMock
+
+        from portfolio.services import save_portfolio_snapshot
+
+        # Создаём первый снимок напрямую с позициями
+        snap1 = self._make_snapshot()
+        self._add_positions(snap1, count=5)
+        self.assertEqual(Position.objects.filter(snapshot=snap1).count(), 5)
+
+        # Мокаем portfolio_data для второго снимка
+        pos_mock = MagicMock()
+        pos_mock.figi = "FIGI_NEW"
+        pos_mock.ticker = "NEW"
+        pos_mock.instrument_type = "share"
+        pos_mock.quantity.units = 10
+        pos_mock.quantity.nano = 0
+        pos_mock.current_price.units = 200
+        pos_mock.current_price.nano = 0
+        pos_mock.average_position_price.units = 190
+        pos_mock.average_position_price.nano = 0
+        pos_mock.expected_yield.units = 5
+        pos_mock.expected_yield.nano = 0
+
+        portfolio_mock = MagicMock()
+        portfolio_mock.positions = [pos_mock]
+        for field in [
+            "total_amount_portfolio", "total_amount_shares", "total_amount_bonds",
+            "total_amount_etf", "total_amount_currencies",
+        ]:
+            attr = getattr(portfolio_mock, field)
+            attr.units = 1000
+            attr.nano = 0
+        portfolio_mock.expected_yield = None
+
+        snap2 = save_portfolio_snapshot(account=self.account, portfolio_data=portfolio_mock)
+
+        # Старый снимок не должен иметь позиций
+        self.assertEqual(Position.objects.filter(snapshot=snap1).count(), 0)
+        # Новый снимок должен иметь позиции
+        self.assertEqual(Position.objects.filter(snapshot=snap2).count(), 1)
+        # Флаг positions_pruned у старого снимка должен быть True
+        snap1.refresh_from_db()
+        self.assertTrue(snap1.positions_pruned)
+        # Флаг positions_pruned у нового снимка должен быть False
+        self.assertFalse(snap2.positions_pruned)
+
+    def test_pruning_flag_set_on_old_snapshots(self):
+        """Снимки без позиций (после pruning) помечаются positions_pruned=True."""
+        snap1 = self._make_snapshot()
+        snap2 = self._make_snapshot()
+        self._add_positions(snap1, count=2)
+        self._add_positions(snap2, count=2)
+
+        # Ручной pruning (имитируем логику из services.py)
+        Position.objects.filter(
+            snapshot__account=self.account
+        ).exclude(snapshot_id=snap2.id).delete()
+        PortfolioSnapshot.objects.filter(
+            account=self.account
+        ).exclude(id=snap2.id).update(positions_pruned=True)
+
+        snap1.refresh_from_db()
+        snap2.refresh_from_db()
+        self.assertTrue(snap1.positions_pruned)
+        self.assertFalse(snap2.positions_pruned)
+
+    # ── 2.2 Downsampling helpers ─────────────────────────────────────────────
+
+    def test_pick_daily_keeps_latest_per_day(self):
+        """_pick_daily должен оставлять самый поздний снимок за каждый день."""
+        import datetime
+
+        from django.utils import timezone
+
+        from portfolio.tasks import _pick_daily
+
+        now = timezone.now()
+        day1_morning = now.replace(hour=9, minute=0, second=0)
+        day1_evening = now.replace(hour=22, minute=0, second=0)
+        day2_noon = (now + datetime.timedelta(days=1)).replace(hour=12, minute=0, second=0)
+
+        snapshots = [(1, day1_morning), (2, day1_evening), (3, day2_noon)]
+        keep = _pick_daily(snapshots)
+
+        self.assertIn(2, keep)   # вечерний день1 — оставить
+        self.assertIn(3, keep)   # единственный день2 — оставить
+        self.assertNotIn(1, keep)  # утренний день1 — удалить
+
+    def test_pick_weekly_keeps_latest_per_week(self):
+        """_pick_weekly должен оставлять самый поздний снимок за каждую ISO-неделю."""
+        import datetime
+
+        from django.utils import timezone
+
+        from portfolio.tasks import _pick_weekly
+
+        # Неделя 1: понедельник и пятница
+        monday = timezone.now().replace(hour=10)
+        # Находим ближайший понедельник
+        monday = monday - datetime.timedelta(days=monday.weekday())
+        friday = monday + datetime.timedelta(days=4)
+        # Неделя 2: следующий понедельник
+        next_monday = monday + datetime.timedelta(weeks=1)
+
+        snapshots = [(10, monday), (11, friday), (12, next_monday)]
+        keep = _pick_weekly(snapshots)
+
+        self.assertIn(11, keep)    # пятница — последняя на первой неделе
+        self.assertIn(12, keep)    # единственная на второй неделе
+        self.assertNotIn(10, keep)  # понедельник первой недели — удалить
+
+    def test_db_stats_endpoint(self):
+        """GET /api/v1/portfolio/db_stats/ возвращает корректную структуру."""
+        from rest_framework.test import APIClient
+        client = APIClient()
+        snap = self._make_snapshot()
+        self._add_positions(snap, count=4)
+
+        response = client.get("/api/v1/portfolio/db_stats/")
+        self.assertEqual(response.status_code, 200)
+        data = response.data
+        self.assertIn("accounts", data)
+        self.assertIn("snapshots", data)
+        self.assertIn("positions", data)
+        self.assertGreaterEqual(data["positions"], 4)
+        self.assertGreaterEqual(data["snapshots"]["total"], 1)

@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.core.cache import cache
@@ -6,6 +7,8 @@ from t_tech.invest.utils import money_to_decimal, quotation_to_decimal
 from users.models import InvestorUser
 
 from .models import Account, PortfolioSnapshot, Position
+
+logger = logging.getLogger(__name__)
 
 _INSTRUMENT_CACHE: dict[str, tuple[str, str]] = {
     "RUB000UTSTOM": ("Рубль РФ (Кэш)", "RUB"),
@@ -64,6 +67,28 @@ def save_portfolio_snapshot(account: Account, portfolio_data, client=None) -> Po
             )
 
         Position.objects.bulk_create(position_to_create)
+
+        # Pruning: удаляем позиции у всех ПРЕДЫДУЩИХ снимков этого счёта.
+        # Оставляем только позиции свежесозданного снимка.
+        # Экономия ~96% объёма таблицы Position.
+        pruned_count, _ = (
+            Position.objects
+            .filter(snapshot__account=account)
+            .exclude(snapshot_id=portfoliosnapshot.id)
+            .delete()
+        )
+        if pruned_count:
+            logger.info(
+                f"🗑 Pruning: удалено {pruned_count} старых позиций "
+                f"для счёта {account.account_id!r}"
+            )
+            # Помечаем предыдущие снимки как обрезанные
+            PortfolioSnapshot.objects.filter(
+                account=account
+            ).exclude(
+                id=portfoliosnapshot.id
+            ).update(positions_pruned=True)
+
         return portfoliosnapshot
 
 

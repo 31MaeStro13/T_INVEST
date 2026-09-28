@@ -20,4 +20,8 @@ app.conf.beat_schedule = {
         "task": "analytics.check_and_send_risk_alerts",
         "schedule": crontab(hour=19, minute=0),  # Каждый вечер в 19:00 МСК
     },
+    "downsample-snapshots-daily": {
+        "task": "portfolio.tasks.downsample_snapshots",
+        "schedule": crontab(hour=2, minute=0),  # Каждую ночь в 02:00
+    },
 }

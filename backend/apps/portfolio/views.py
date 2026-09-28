@@ -134,3 +134,32 @@ class UploadReportView(APIView):
             )
 
 
+class DBStatsView(APIView):
+    """
+    GET /api/v1/portfolio/db_stats/
+    Возвращает статистику объёма таблиц снимков и позиций.
+    Полезно для мониторинга эффекта прореживания (Блок 2).
+    """
+
+    def get(self, request):
+        from .models import PortfolioSnapshot, Position
+
+        snapshot_count = PortfolioSnapshot.objects.count()
+        position_count = Position.objects.count()
+        account_count = Account.objects.count()
+
+        pruned_count = PortfolioSnapshot.objects.filter(positions_pruned=True).count()
+        not_pruned = snapshot_count - pruned_count
+
+        return Response({
+            "accounts": account_count,
+            "snapshots": {
+                "total": snapshot_count,
+                "positions_pruned": pruned_count,
+                "positions_intact": not_pruned,
+            },
+            "positions": position_count,
+            "avg_positions_per_snapshot": (
+                round(position_count / snapshot_count, 1) if snapshot_count else 0
+            ),
+        })
