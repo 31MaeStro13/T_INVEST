@@ -6,6 +6,24 @@ services:
     ports:
       - "6379:6379"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: t_invest_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: t_invest_db
+      POSTGRES_USER: t_invest_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-t_invest_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U t_invest_user -d t_invest_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: .
     container_name: t_invest_backend
@@ -15,19 +33,22 @@ services:
              python backend/manage.py collectstatic --noinput &&
              gunicorn config.wsgi:application --chdir /app/backend --bind 0.0.0.0:8000 --workers 4 --threads 2 --backlog 2048 --access-logfile - --error-logfile -"
     volumes:
-      - ./backend/db.sqlite3:/app/backend/db.sqlite3
       - ./backend:/app/backend
       - staticfiles_volume:/app/backend/staticfiles
     expose:
       - "8000"
     environment:
+      - DATABASE_URL=postgres://t_invest_user:${POSTGRES_PASSWORD:-t_invest_secret}@postgres:5432/t_invest_db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_CACHE_URL=redis://redis:6379/1
     env_file:
       - .env
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   celery_worker:
     build: .
@@ -35,17 +56,21 @@ services:
     restart: unless-stopped
     command: celery --workdir backend -A config worker --loglevel=info
     volumes:
-      - ./backend/db.sqlite3:/app/backend/db.sqlite3
       - ./backend:/app/backend
     environment:
+      - DATABASE_URL=postgres://t_invest_user:${POSTGRES_PASSWORD:-t_invest_secret}@postgres:5432/t_invest_db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_CACHE_URL=redis://redis:6379/1
     env_file:
       - .env
     depends_on:
-      - redis
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_started
 
   celery_beat:
     build: .
@@ -53,18 +78,21 @@ services:
     restart: unless-stopped
     command: celery --workdir backend -A config beat --loglevel=info
     volumes:
-      - ./backend/db.sqlite3:/app/backend/db.sqlite3
       - ./backend:/app/backend
     environment:
+      - DATABASE_URL=postgres://t_invest_user:${POSTGRES_PASSWORD:-t_invest_secret}@postgres:5432/t_invest_db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_CACHE_URL=redis://redis:6379/1
     env_file:
       - .env
-
     depends_on:
-      - redis
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_started
 
   nginx:
     image: nginx:alpine
@@ -97,4 +125,4 @@ services:
 
 volumes:
   staticfiles_volume:
-
+  postgres_data:

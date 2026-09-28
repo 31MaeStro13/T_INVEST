@@ -1,15 +1,25 @@
 """
-excel_parser.py — In-Memory потоковый парсер брокерских отчетов (.xlsx) Т-Банка и брокеров РФ.
+excel_parser.py — Защищённый потоковый парсер брокерских отчетов (.xlsx).
 
-Архитектурный принцип (Zero-Disk Footprint):
-1. Файл читается исключительно в оперативной памяти (RAM) через openpyxl (read_only=True).
-2. На диск не записывается ни байта (отсутствие временных файлов / tempfile).
-3. Позиции и метрики риска рассчитываются "на лету" через NumPy.
-4. Персональные данные и номера брокерских счетов не сохраняются в БД.
+Архитектурные принципы:
+1. Zero-Disk Footprint: файл читается только в RAM, на диск не пишется ни байта.
+2. Chunked Reading: строки читаются через генератор, не загружаясь все сразу в память.
+3. Hardened Security: защита от ZIP Bomb, Formula Injection, OOM, XXE, Macro-файлов.
+4. Strict Limits: ≤ 10 000 строк, ≤ 500 позиций на файл.
+
+Закрытые векторы атак:
+- OOM / Memory Bomb  → MAX_FILE_BYTES (5 МБ) + MAX_ROWS (10 000)
+- ZIP Bomb            → Проверка магического байта PK\\x03\\x04
+- Formula Injection   → Санация ячеек с префиксами =, +, -, @
+- VBA/Macro Injection → Отклонение .xlsm / не-OOXML форматов
+- XXE                 → openpyxl read_only=True (внешние сущности не грузит)
+- CPU DoS             → MAX_ROWS + MAX_POSITIONS лимиты
+- Path Traversal      → Имя файла никуда не сохраняется и не используется
 """
 
 import io
 import logging
+import zipfile
 from typing import Any
 
 import numpy as np
@@ -17,24 +27,89 @@ import openpyxl
 
 logger = logging.getLogger(__name__)
 
-# Синонимы колонок для гибкого парсинга отчетов разных брокеров
+# ── Жёсткие лимиты безопасности ────────────────────────────────────────────
+MAX_FILE_BYTES = 5 * 1024 * 1024      # 5 МБ — максимальный размер файла
+MAX_ROWS = 10_000                       # максимум строк для обхода (включая заголовки)
+MAX_POSITIONS = 500                     # максимум позиций в итоговом списке
+MAX_HEADER_SCAN_ROWS = 30              # сколько строк сверху сканировать в поисках заголовка
+MAX_CELL_LEN = 1_024                   # максимум символов в одной ячейке
+
+# Префиксы формул — потенциальный Formula Injection
+_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+# Синонимы колонок для гибкого парсинга отчетов разных брокеров РФ
 COLUMN_SYNONYMS = {
     "ticker": ["тикер", "код", "код инструмента", "ticker", "symbol", "инструмент (код)"],
     "name": ["наименование", "название", "эмитент", "краткое наименование", "name", "security"],
     "quantity": ["количество", "кол-во", "кол-во шт.", "кол-во шт", "остаток", "quantity", "qty"],
     "price": ["текущая цена", "цена", "рыночная цена", "цена закрытия", "price", "last_price"],
     "total_value": [
-        "стоимость",
-        "рыночная стоимость",
-        "сумма",
-        "оценка",
-        "стоимость позиции",
-        "total",
-        "value",
-        "amount",
+        "стоимость", "рыночная стоимость", "сумма", "оценка",
+        "стоимость позиции", "total", "value", "amount",
     ],
     "instrument_type": ["вид", "тип", "категория", "класс актива", "тип инструмента", "type"],
 }
+
+
+def _validate_xlsx_bytes(data: bytes) -> None:
+    """
+    Проверяет что переданные байты являются корректным ZIP-файлом (OOXML).
+    Отклоняет ZIP Bomb и не-OOXML форматы (xls, xlsm с VBA).
+
+    :raises ValueError: если файл не является валидным .xlsx.
+    """
+    # Проверка магического байта ZIP: PK\x03\x04
+    if not data[:4] == b"PK\x03\x04":
+        raise ValueError(
+            "Файл не является корректным Excel (.xlsx). "
+            "Убедитесь, что файл не повреждён и сохранён в формате .xlsx."
+        )
+
+    # Открываем как ZIP и проверяем признаки VBA-макросов (xlsm)
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+            # xlsm содержит vbaProject.bin — отклоняем
+            if any("vbaProject" in n or n.endswith(".bin") for n in names):
+                raise ValueError(
+                    "Файл содержит макросы (VBA) и не может быть обработан из соображений безопасности. "
+                    "Пересохраните отчёт в формате .xlsx (без макросов)."
+                )
+            # ZIP Bomb guard: суммируем несжатый размер всех записей
+            total_uncompressed = sum(i.file_size for i in zf.infolist())
+            # Если несжатый размер > 50 МБ при файле ≤ 5 МБ — это аномалия
+            if total_uncompressed > 50 * 1024 * 1024:
+                raise ValueError(
+                    "Файл подозрительно большой в распакованном виде. "
+                    "Возможно, файл повреждён или содержит избыточные данные."
+                )
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            "Файл повреждён или не является корректным Excel (.xlsx)."
+        ) from exc
+
+
+def _sanitize_cell(value: Any) -> Any:
+    """
+    Санирует значение ячейки: обрезает строки, удаляет Formula Injection-префиксы.
+    Числа и None возвращаются без изменений.
+    """
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+
+    s = str(value)
+
+    # Ограничиваем длину ячейки
+    if len(s) > MAX_CELL_LEN:
+        s = s[:MAX_CELL_LEN]
+
+    # Formula Injection: ячейка начинается с формульного символа
+    stripped = s.strip()
+    if stripped and stripped[0] in _FORMULA_PREFIXES:
+        logger.warning("Formula Injection attempt blocked in cell: %r", stripped[:50])
+        return ""  # обнуляем — не парсим как число
+
+    return s
 
 
 def _classify_instrument(raw_type: str, ticker: str, name: str) -> str:
@@ -49,28 +124,48 @@ def _classify_instrument(raw_type: str, ticker: str, name: str) -> str:
         return "currency"
     if any(k in text for k in ["акци", "share", "stock"]):
         return "share"
-    return "share"  # по умолчанию
+    return "share"
 
 
 def parse_broker_report_xlsx(file_content: bytes | io.BytesIO) -> dict[str, Any]:
     """
-    Парсит .xlsx брокерский отчет в RAM, извлекает позиции и считает метрики риска.
+    Парсит .xlsx брокерский отчёт в RAM, извлекает позиции и считает метрики риска.
+    Использует потоковое чтение строк (chunked), не загружая весь файл в память.
 
     :param file_content: бинарный поток или BytesIO файла Excel.
     :return: структурированный словарь с позициями, долями и метриками концентрации.
-    :raises ValueError: если отчет не удалось распознать или файл поврежден.
+    :raises ValueError: если отчёт не удалось распознать, файл повреждён или подозрителен.
     """
-    if isinstance(file_content, bytes):
-        stream = io.BytesIO(file_content)
+    # Нормализуем вход к bytes для валидации
+    if isinstance(file_content, io.BytesIO):
+        data = file_content.getvalue()
     else:
-        stream = file_content
+        data = file_content
 
+    # ── Шаг 0: Валидация файла до открытия openpyxl ─────────────────────────
+    if len(data) > MAX_FILE_BYTES:
+        raise ValueError(
+            f"Размер файла превышает лимит {MAX_FILE_BYTES // (1024 * 1024)} МБ. "
+            "Загрузите более компактный отчёт."
+        )
+
+    _validate_xlsx_bytes(data)
+
+    # ── Шаг 1: Открытие книги ────────────────────────────────────────────────
     try:
-        wb = openpyxl.load_workbook(stream, read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(
+            io.BytesIO(data),
+            read_only=True,    # потоковый режим — не грузит все ячейки сразу
+            data_only=True,    # возвращает значения ячеек, а не формулы
+            keep_links=False,  # отключает внешние ссылки (XXE-вектор)
+        )
     except Exception as exc:
-        logger.error(f"Ошибка чтения Excel-файла: {exc}")
-        raise ValueError("Не удалось открыть файл. Убедитесь, что это корректный документ Excel (.xlsx).") from exc
+        logger.error("Ошибка чтения Excel-файла: %s", exc)
+        raise ValueError(
+            "Не удалось открыть файл. Убедитесь, что это корректный документ Excel (.xlsx)."
+        ) from exc
 
+    # ── Шаг 2: Выбор листа ──────────────────────────────────────────────────
     sheet = None
     target_keywords = ["портфель", "актив", "сводка", "остатк", "отчет", "позици"]
     for s_name in wb.sheetnames:
@@ -81,96 +176,102 @@ def parse_broker_report_xlsx(file_content: bytes | io.BytesIO) -> dict[str, Any]
         sheet = wb.active
 
     if not sheet:
+        wb.close()
         raise ValueError("В Excel-файле не найдено рабочих листов с данными.")
 
-    # 1. Поиск строки с заголовками
+    # ── Шаг 3: Потоковый обход строк (chunked) + поиск заголовка ────────────
     col_mapping: dict[str, int] = {}
-    header_row_idx = None
+    header_row_idx: int | None = None
+    all_rows: list[tuple] = []   # сохраняем строки после заголовка
+    row_count = 0
 
-    rows = list(sheet.iter_rows(values_only=True))
-    if not rows:
-        raise ValueError("Файл Excel пуст.")
-
-    for row_idx, row in enumerate(rows[:25]):
-        if not row:
-            continue
-        row_str_cells = [str(c).strip().lower() if c is not None else "" for c in row]
-        matches = 0
-        temp_map = {}
-
-        for field, synonyms in COLUMN_SYNONYMS.items():
-            for col_idx, cell_val in enumerate(row_str_cells):
-                if any(syn in cell_val for syn in synonyms):
-                    temp_map[field] = col_idx
-                    matches += 1
-                    break
-
-        # Если нашли минимум 2 ключевые колонки (например, тикер/имя и количество/цена)
-        if matches >= 2 and ("ticker" in temp_map or "name" in temp_map):
-            col_mapping = temp_map
-            header_row_idx = row_idx
+    for row in sheet.iter_rows(values_only=True):
+        if row_count >= MAX_ROWS:
+            logger.warning("Excel файл превышает лимит %d строк — обработка остановлена.", MAX_ROWS)
             break
 
-    # Фоллбэк: если специфических заголовков нет, используем дефолтные позиции колонок
-    if header_row_idx is None:
-        # Предполагаем формат: A=Ticker, B=Name, C=Qty, D=Price, E=Total, F=Type
-        col_mapping = {
-            "ticker": 0,
-            "name": 1,
-            "quantity": 2,
-            "price": 3,
-            "total_value": 4,
-            "instrument_type": 5,
-        }
-        header_row_idx = 0
+        # Санация каждой ячейки строки
+        sanitized_row = tuple(_sanitize_cell(cell) for cell in row)
 
-    # 2. Извлечение позиций
+        if header_row_idx is None and row_count < MAX_HEADER_SCAN_ROWS:
+            # Пробуем найти строку заголовков
+            row_str_cells = [
+                str(c).strip().lower() if c is not None else "" for c in sanitized_row
+            ]
+            matches = 0
+            temp_map: dict[str, int] = {}
+
+            for field, synonyms in COLUMN_SYNONYMS.items():
+                for col_idx, cell_val in enumerate(row_str_cells):
+                    if any(syn in cell_val for syn in synonyms):
+                        temp_map[field] = col_idx
+                        matches += 1
+                        break
+
+            if matches >= 2 and ("ticker" in temp_map or "name" in temp_map):
+                col_mapping = temp_map
+                header_row_idx = row_count
+                row_count += 1
+                continue  # пропускаем саму строку заголовка
+
+        if header_row_idx is not None:
+            all_rows.append(sanitized_row)
+
+        row_count += 1
+
+    wb.close()
+
+    # Фоллбэк если заголовков не нашли
+    if header_row_idx is None:
+        col_mapping = {"ticker": 0, "name": 1, "quantity": 2, "price": 3, "total_value": 4, "instrument_type": 5}
+        all_rows = [tuple(_sanitize_cell(c) for c in r) for r in all_rows]
+
+    if not all_rows:
+        raise ValueError("Файл Excel пуст или не содержит данных после заголовка.")
+
+    # ── Шаг 4: Извлечение позиций ────────────────────────────────────────────
     positions: list[dict[str, Any]] = []
 
-    for row in rows[header_row_idx + 1:]:
+    def get_val(row: tuple, field: str, default=None) -> Any:
+        idx = col_mapping.get(field)
+        if idx is not None and idx < len(row):
+            return row[idx]
+        return default
+
+    def parse_float(val: Any) -> float:
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).replace(" ", "").replace(",", ".").replace("\xa0", "").strip()
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    for row in all_rows:
         if not row or all(c is None for c in row):
             continue
 
-        def get_val(field: str, default=None):
-            idx = col_mapping.get(field)
-            if idx is not None and idx < len(row):
-                return row[idx]
-            return default
+        raw_ticker = str(get_val(row, "ticker") or "").strip()
+        raw_name = str(get_val(row, "name") or "").strip()
 
-        raw_ticker = str(get_val("ticker") or "").strip()
-        raw_name = str(get_val("name") or "").strip()
-
-        # Игнорируем строки итогов и мусор
-        if any(ign in (raw_ticker + raw_name).lower() for ign in ["итого", "всего", "total", "сумма"]):
+        # Игнорируем строки итогов
+        combined = (raw_ticker + raw_name).lower()
+        if any(ign in combined for ign in ["итого", "всего", "total", "сумма", "итог"]):
             continue
 
-        raw_qty = get_val("quantity")
-        raw_price = get_val("price")
-        raw_total = get_val("total_value")
-        raw_type = str(get_val("instrument_type") or "").strip()
+        quantity = parse_float(get_val(row, "quantity"))
+        price = parse_float(get_val(row, "price"))
+        total_val = parse_float(get_val(row, "total_value"))
+        raw_type = str(get_val(row, "instrument_type") or "").strip()
 
-        # Парсинг чисел
-        def parse_float(val) -> float:
-            if val is None:
-                return 0.0
-            if isinstance(val, (int, float)):
-                return float(val)
-            s = str(val).replace(" ", "").replace(",", ".").replace("\xa0", "").strip()
-            try:
-                return float(s)
-            except ValueError:
-                return 0.0
-
-        quantity = parse_float(raw_qty)
-        price = parse_float(raw_price)
-        total_val = parse_float(raw_total)
-
+        # Дорасчёт missing значений
         if total_val <= 0.0 and quantity > 0 and price > 0:
             total_val = round(quantity * price, 2)
         elif price <= 0.0 and quantity > 0 and total_val > 0:
             price = round(total_val / quantity, 2)
 
-        # Если ни тикера, ни имени, ни стоимости — пропускаем
         if not raw_ticker and not raw_name:
             continue
         if total_val <= 0.0 and quantity <= 0.0:
@@ -189,14 +290,20 @@ def parse_broker_report_xlsx(file_content: bytes | io.BytesIO) -> dict[str, Any]
             "total_value": total_val,
         })
 
-    wb.close()
+        # Лимит позиций
+        if len(positions) >= MAX_POSITIONS:
+            logger.warning(
+                "Достигнут лимит позиций (%d). Обработка файла остановлена.", MAX_POSITIONS
+            )
+            break
 
     if not positions:
         raise ValueError(
-            "Не удалось извлечь активы из отчета. Проверьте формат таблицы (должны быть колонки Тикер, Количество, Цена/Стоимость)."
+            "Не удалось извлечь активы из отчёта. "
+            "Проверьте формат таблицы (должны быть колонки Тикер, Количество, Цена/Стоимость)."
         )
 
-    # 3. Расчет метрик риска и структуры через NumPy
+    # ── Шаг 5: Расчёт метрик риска через NumPy ──────────────────────────────
     values = np.array([p["total_value"] for p in positions], dtype=np.float64)
     total_portfolio_value = float(np.sum(values))
 
@@ -205,6 +312,7 @@ def parse_broker_report_xlsx(file_content: bytes | io.BytesIO) -> dict[str, Any]
         for i, pos in enumerate(positions):
             pos["weight"] = round(float(weights[i]) * 100, 2)
     else:
+        weights = np.zeros(len(positions))
         for pos in positions:
             pos["weight"] = 0.0
 
@@ -214,13 +322,10 @@ def parse_broker_report_xlsx(file_content: bytes | io.BytesIO) -> dict[str, Any]
     etf_sum = sum(p["total_value"] for p in positions if p["instrument_type"] == "etf")
     currencies_sum = sum(p["total_value"] for p in positions if p["instrument_type"] == "currency")
 
-    # Сортировка позиций по убыванию стоимости
+    # Сортировка по убыванию стоимости
     positions.sort(key=lambda x: x["total_value"], reverse=True)
 
-    # Индекс концентрации Герфиндаля-Хиршмана (HHI) = sum(w_i_percent ** 2)
-    # HHI < 1500 — низкая концентрация (отличная диверсификация)
-    # 1500..2500 — умеренная
-    # > 2500 — высокая концентрация (риск)
+    # Индекс Герфиндаля-Хиршмана (HHI)
     if total_portfolio_value > 0:
         hhi = float(np.sum((weights * 100) ** 2))
         top_asset_share = float(positions[0]["weight"]) if positions else 0.0

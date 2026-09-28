@@ -1,3 +1,4 @@
+from core.throttling import AiAuditorRateThrottle
 from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.response import Response
@@ -99,7 +100,12 @@ class AskAIAuditorView(APIView):
     Body:
         telegram_id: int
         prompt: str
+
+    Rate Limit: 5 запросов в час на telegram_id (защита от злоупотреблений и перерасхода квоты Gemini).
+    При превышении → HTTP 429 с понятным сообщением.
     """
+
+    throttle_classes = [AiAuditorRateThrottle]
 
     def post(self, request):
         telegram_id = request.data.get("telegram_id")

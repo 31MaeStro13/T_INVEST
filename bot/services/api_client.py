@@ -239,6 +239,13 @@ class BackendAPIClient:
                 if response.status == 200:
                     data = await response.json()
                     return data.get("response", "Не удалось получить ответ.")
+                if response.status == 429:
+                    # Rate limit — бэкенд вернул 429
+                    return (
+                        "⏳ Вы превысили лимит запросов к AI-аудитору (5 в час). "
+                        "Пожалуйста, попробуйте через некоторое время.\n\n"
+                        "Пока можете посмотреть аналитику и графики портфеля в обычном режиме."
+                    )
                 logger.warning(f"Ошибка ответа AI-агента: статус {response.status}")
                 return "⚠️ Не удалось получить ответ от AI-агента. Попробуйте позже."
         except asyncio.TimeoutError:

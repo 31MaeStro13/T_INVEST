@@ -1,7 +1,10 @@
 
 import logging
+import os
 
+import requests as http_requests
 from celery import shared_task
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -13,6 +16,69 @@ from .models import Account, PortfolioSnapshot
 from .services import save_portfolio_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _deactivate_token_and_notify(token_obj, user: InvestorUser) -> None:
+    """
+    При получении 401 от Т-Банка:
+    1. Деактивирует токен (is_active = False) в БД.
+    2. Отправляет push-уведомление пользователю через Telegram Bot API.
+
+    Вызывается из Celery воркера напрямую — без HTTP к бэкенду,
+    так как мы уже внутри Django-контекста.
+    """
+    # 1. Деактивировать токен
+    try:
+        if hasattr(token_obj, "is_active"):
+            # Это BrokerToken
+            token_obj.is_active = False
+            token_obj.save(update_fields=["is_active"])
+            logger.info("🔒 Токен #%d пользователя #%d деактивирован.", token_obj.id, user.id)
+        else:
+            # Это сам InvestorUser с encrypted_token — очищаем
+            user.encrypted_token = ""
+            user.save(update_fields=["encrypted_token"])
+            logger.info("🔒 Токен пользователя #%d очищен.", user.id)
+    except Exception as exc:
+        logger.error("Ошибка при деактивации токена: %s", exc)
+
+    # 2. Telegram push-уведомление
+    bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "") or os.getenv("BOT_TOKEN", "")
+    if not bot_token or not user.telegram_id:
+        logger.warning(
+            "Не удалось отправить уведомление: BOT_TOKEN или telegram_id отсутствует."
+        )
+        return
+
+    text = (
+        "⚠️ <b>Ваш токен Т-Инвестиций устарел или был отозван.</b>\n\n"
+        "Синхронизация портфеля приостановлена.\n\n"
+        "Пожалуйста, обновите токен:\n"
+        "1️⃣ Откройте Т-Инвестиции\n"
+        "2️⃣ Перейдите в <b>Настройки → API-токен</b>\n"
+        "3️⃣ Скопируйте новый токен и отправьте его мне через /start\n\n"
+        "Ваши исторические данные портфеля сохранены."
+    )
+
+    try:
+        resp = http_requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                "chat_id": user.telegram_id,
+                "text": text,
+                "parse_mode": "HTML",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            logger.info("📬 Уведомление об устаревшем токене отправлено пользователю #%d.", user.id)
+        else:
+            logger.warning(
+                "Telegram API вернул %d при отправке уведомления: %s",
+                resp.status_code, resp.text[:200],
+            )
+    except Exception as exc:
+        logger.error("Ошибка отправки Telegram-уведомления: %s", exc)
 
 
 @shared_task(
@@ -87,7 +153,11 @@ def sync_user_portfolio(self, user_id: int):
 
         except RequestError as exc:
             if "UNAUTHENTICATED" in str(exc) or "401" in str(exc):
-                logger.error(f"❌ Токен {token_obj} пользователя #{user.id} недействителен: {exc}")
+                logger.error(
+                    "❌ Токен %s пользователя #%d недействителен: %s",
+                    token_obj, user.id, exc,
+                )
+                _deactivate_token_and_notify(token_obj, user)
                 continue
             raise
 

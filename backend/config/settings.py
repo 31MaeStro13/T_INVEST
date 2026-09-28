@@ -21,6 +21,8 @@ sys.path.insert(0, str(BASE_DIR / 'apps'))
 load_dotenv(BASE_DIR.parent / ".env")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 USER_HASH_SALT = os.getenv("USER_HASH_SALT", "t_invest_zero_knowledge_salt_2026")
+# Токен Telegram-бота — используется Celery воркером для push-уведомлений об устаревших токенах
+TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
@@ -49,6 +51,15 @@ INSTALLED_APPS = [
     "users",
     "analytics",
 ]
+
+# Django REST Framework
+REST_FRAMEWORK = {
+    # Rate limiting: используем Django Cache (Redis в prod, LocMem в тестах)
+    "DEFAULT_THROTTLE_CLASSES": [],  # глобально без лимитов — лимиты только на конкретных views
+    "DEFAULT_THROTTLE_RATES": {
+        "ai_auditor": "5/hour",    # AI-аудитор: 5 запросов в час на пользователя
+    },
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -82,13 +93,28 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+#
+# В production (Docker) используется PostgreSQL через DATABASE_URL.
+# При локальной разработке (без DATABASE_URL) — SQLite для простоты.
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL:
+    import dj_database_url
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,       # persistent connections
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+
 
 
 # Password validation

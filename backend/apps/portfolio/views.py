@@ -95,36 +95,57 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
 class UploadReportView(APIView):
     """
     POST /api/v1/portfolio/upload_report/
-    In-Memory анализ брокерского отчета Excel (.xlsx) без сохранения на диск и в БД.
+    In-Memory анализ брокерского отчёта Excel (.xlsx).
+    Zero-Disk Footprint: на диск не пишется ни байта.
+
+    Защита:
+    - Лимит 5 МБ (Nginx + Django)
+    - Проверка магического байта ZIP до парсинга
+    - Санация ячеек от Formula Injection внутри парсера
+    - Лимит строк (10 000) и позиций (500) внутри парсера
     """
 
     parser_classes = [MultiPartParser, FormParser]
+
+    # Лимит на уровне Django (дублирует Nginx — defence in depth)
+    _MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 МБ
 
     def post(self, request):
         file_obj = request.FILES.get("file")
         if not file_obj:
             return Response(
-                {"detail": "Файл отчета не прикреплен. Загрузите файл с полем 'file'."},
+                {"detail": "Файл отчёта не прикреплён. Загрузите файл с полем 'file'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Проверка расширения (первый барьер — простой)
         if not file_obj.name.lower().endswith(".xlsx"):
             return Response(
-                {"detail": "Поддерживаются только отчеты в формате Excel (.xlsx)."},
+                {"detail": "Поддерживаются только отчёты в формате Excel (.xlsx)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if file_obj.size > 10 * 1024 * 1024:
+        # Проверка размера до чтения в память
+        if file_obj.size > self._MAX_UPLOAD_BYTES:
             return Response(
-                {"detail": "Размер файла превышает лимит 10 МБ."},
+                {"detail": f"Размер файла превышает лимит {self._MAX_UPLOAD_BYTES // (1024 * 1024)} МБ."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             from .excel_parser import parse_broker_report_xlsx
 
-            report_data = parse_broker_report_xlsx(file_obj.read())
+            # Читаем один раз — парсер сам проверит magic bytes и ZIP структуру
+            file_bytes = file_obj.read(self._MAX_UPLOAD_BYTES + 1)
+            if len(file_bytes) > self._MAX_UPLOAD_BYTES:
+                return Response(
+                    {"detail": f"Размер файла превышает лимит {self._MAX_UPLOAD_BYTES // (1024 * 1024)} МБ."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            report_data = parse_broker_report_xlsx(file_bytes)
             return Response(report_data, status=status.HTTP_200_OK)
+
         except ValueError as err:
             return Response({"detail": str(err)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:

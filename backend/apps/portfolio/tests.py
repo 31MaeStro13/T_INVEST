@@ -348,3 +348,72 @@ class DataRetentionTests(TestCase):
         self.assertIn("positions", data)
         self.assertGreaterEqual(data["positions"], 4)
         self.assertGreaterEqual(data["snapshots"]["total"], 1)
+
+
+class ExcelSecurityTests(TestCase):
+    """Тестирование защиты Excel-парсера от атак."""
+
+    def _make_xlsx_bytes(self, rows: list[list]) -> bytes:
+        """Вспомогательный метод: создаёт корректный .xlsx в памяти."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        # Заголовок
+        ws.append(["Тикер", "Наименование", "Количество", "Текущая цена", "Стоимость", "Тип"])
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def test_valid_xlsx_parsed_successfully(self):
+        """Корректный .xlsx парсится без ошибок."""
+        from portfolio.excel_parser import parse_broker_report_xlsx
+        xlsx = self._make_xlsx_bytes([
+            ["SBER", "Сбербанк", 10, 300.0, 3000.0, "Акция"],
+            ["LKOH", "Лукойл", 5, 6000.0, 30000.0, "Акция"],
+        ])
+        result = parse_broker_report_xlsx(xlsx)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["positions_count"], 2)
+
+    def test_non_zip_file_rejected(self):
+        """Файл не являющийся ZIP (не .xlsx) должен быть отклонён."""
+        from portfolio.excel_parser import parse_broker_report_xlsx
+        fake_data = b"This is not a ZIP file at all, just text content"
+        with self.assertRaises(ValueError, msg="Должна быть ValueError для не-ZIP файла"):
+            parse_broker_report_xlsx(fake_data)
+
+    def test_file_too_large_rejected(self):
+        """Файл > 5 МБ должен быть отклонён ещё до открытия openpyxl."""
+        from portfolio.excel_parser import MAX_FILE_BYTES, parse_broker_report_xlsx
+        # Создаём корректный xlsx, но потом добавляем мусор чтобы превысить лимит
+        xlsx = self._make_xlsx_bytes([["SBER", "Сбер", 10, 300.0, 3000.0, "Акция"]])
+        oversized = xlsx + b"\x00" * (MAX_FILE_BYTES + 1)
+        with self.assertRaises(ValueError, msg="Должна быть ValueError для большого файла"):
+            parse_broker_report_xlsx(oversized)
+
+    def test_formula_injection_sanitized(self):
+        """Ячейки с формульными префиксами (=, +, @) должны быть обнулены, не вызывать ошибку."""
+        from portfolio.excel_parser import parse_broker_report_xlsx
+        xlsx = self._make_xlsx_bytes([
+            ["=SUM(A1:A100)", "Сбербанк", 10, 300.0, 3000.0, "Акция"],
+            ["+CMD", "Лукойл", 5, 6000.0, 30000.0, "Акция"],
+        ])
+        # Не должно бросать исключение — формулы санируются
+        result = parse_broker_report_xlsx(xlsx)
+        self.assertEqual(result["status"], "success")
+
+    def test_upload_endpoint_rejects_oversized(self):
+        """Эндпоинт /upload_report/ должен отдать 400 для файла > 5 МБ."""
+        client = APIClient()
+        big_content = b"PK\x03\x04" + b"\x00" * (6 * 1024 * 1024)
+        f = SimpleUploadedFile("report.xlsx", big_content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response = client.post("/api/v1/portfolio/upload_report/", {"file": f}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_upload_endpoint_rejects_non_xlsx(self):
+        """Эндпоинт должен отклонять файлы без расширения .xlsx."""
+        client = APIClient()
+        f = SimpleUploadedFile("report.csv", b"ticker,name\nSBER,Sber", content_type="text/csv")
+        response = client.post("/api/v1/portfolio/upload_report/", {"file": f}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
