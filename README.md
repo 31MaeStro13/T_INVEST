@@ -138,8 +138,6 @@ flowchart TD
   <img src="docs/assets/load_test_stress_limits.png" width="48%" />
 </p>
 
-> 📄 **Полный технический отчет:** Детальные перцентили, анализ точек отказа и методология описаны в [`docs/LOAD_TESTING_REPORT.md`](docs/LOAD_TESTING_REPORT.md).
-
 ---
 
 ## 🧪 Тестирование и CI/CD
