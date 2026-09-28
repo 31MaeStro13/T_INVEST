@@ -24,14 +24,14 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --dev --allow-insecure-host opensource.tbank.ru
 
       - name: Run Ruff Linter
         run: uv run ruff check backend/apps/
 
       - name: Run Django Test Suite
         env:
-          ENCRYPTION_KEY: "01234567890123456789012345678901="
+          ENCRYPTION_KEY: "CxhbbbGmtkOpFIxWQ8SyxPVVj-KscuetInBj-OEBGho="
         run: uv run python backend/manage.py test users portfolio analytics
 
   docker-validate:
@@ -45,7 +45,7 @@ jobs:
       - name: Create dummy .env file for validation
         run: |
           echo "BOT_TOKEN=test_token" > .env
-          echo "ENCRYPTION_KEY=01234567890123456789012345678901=" >> .env
+          echo "ENCRYPTION_KEY=CxhbbbGmtkOpFIxWQ8SyxPVVj-KscuetInBj-OEBGho=" >> .env
           echo "CELERY_BROKER_URL=redis://redis:6379/0" >> .env
           echo "CELERY_RESULT_BACKEND=redis://redis:6379/0" >> .env
 
