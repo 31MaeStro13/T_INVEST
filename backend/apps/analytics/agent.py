@@ -3,8 +3,11 @@ AI-агент финансового аудита на базе фреймвор
 Реализует паттерн Tool Calling (Function Calling) поверх аналитического ядра NumPy.
 Строго соответствует ст. 6.1 Федерального закона № 39-ФЗ (Zero-Recommendation Policy).
 """
+import json
 import logging
 import os
+import re
+import time
 from typing import Any
 
 from agno.agent import Agent
@@ -162,18 +165,90 @@ def get_portfolio_auditor_agent(telegram_id: int) -> Agent:
     return agent
 
 
+def _is_error_content(text: str) -> bool:
+    """
+    Проверяет, является ли контент ответа JSON-ошибкой от Gemini API,
+    а не нормальным текстом аудитора.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    # Быстрая проверка: JSON-объект с полем "error"
+    if stripped.startswith("{") and '"error"' in stripped:
+        try:
+            parsed = json.loads(stripped)
+            return "error" in parsed
+        except json.JSONDecodeError:
+            pass
+    # Паттерн кода ошибки (503, 429, 500 и т.д.)
+    if re.search(r'"code":\s*(5\d{2}|429)', stripped):
+        return True
+    return False
+
 
 def ask_auditor(telegram_id: int, user_query: str) -> str:
     """
     Точка входа для выполнения запроса пользователя к AI-агенту.
+    Включает retry-логику на случай временной недоступности (503/429).
     """
-    try:
-        agent = get_portfolio_auditor_agent(telegram_id)
-        response = agent.run(user_query, stream=False)
-        return response.content or "Не удалось сформировать ответ аудитора."
-    except Exception as e:
-        logger.exception("Ошибка при обращении к AI-агенту: %s", e)
-        return (
-            "⚠️ Сервис AI-аудита временно недоступен. "
-            "Пожалуйста, используйте стандартные отчеты и графики портфеля."
-        )
+    _MAX_RETRIES = 2
+    _RETRY_DELAY = 3  # секунд
+
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            agent = get_portfolio_auditor_agent(telegram_id)
+            response = agent.run(user_query, stream=False)
+            content = response.content or ""
+
+            # Agno может вернуть JSON-ошибку в content вместо исключения
+            if _is_error_content(content):
+                stripped = content.strip()
+                try:
+                    err_data = json.loads(stripped)
+                    err_obj = err_data.get("error", {})
+                    code = err_obj.get("code", 0)
+                    api_status = err_obj.get("status", "")
+                except Exception:
+                    code, api_status = 0, ""
+
+                logger.warning(
+                    "Gemini API вернул ошибку в content (attempt %d/%d): code=%s status=%s",
+                    attempt + 1, _MAX_RETRIES + 1, code, api_status,
+                )
+
+                # 503 / UNAVAILABLE — повторяем после паузы
+                if code == 503 or api_status == "UNAVAILABLE":
+                    if attempt < _MAX_RETRIES:
+                        time.sleep(_RETRY_DELAY * (attempt + 1))
+                        continue
+                    return (
+                        "⏳ Сервис анализа портфелей перегружен и временно недоступен. "
+                        "Обычно это занимает несколько минут — попробуйте чуть позже."
+                    )
+
+                # 429 — превышение квоты
+                if code == 429 or api_status == "RESOURCE_EXHAUSTED":
+                    return (
+                        "⚠️ Достигнут лимит запросов к AI-аудитору. "
+                        "Пожалуйста, подождите несколько минут и попробуйте снова."
+                    )
+
+                # Любая другая ошибка API
+                return (
+                    "⚠️ Сервис AI-аудита временно недоступен. "
+                    "Пожалуйста, используйте стандартные отчёты и графики портфеля."
+                )
+
+            return content or "Не удалось сформировать ответ аудитора."
+
+        except Exception as e:
+            logger.exception("Ошибка при обращении к AI-агенту (attempt %d): %s", attempt + 1, e)
+            # Повторяем только если это не последняя попытка
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY)
+                continue
+
+    return (
+        "⚠️ Сервис AI-аудита временно недоступен. "
+        "Пожалуйста, используйте стандартные отчёты и графики портфеля."
+    )
