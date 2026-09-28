@@ -136,7 +136,7 @@ def get_portfolio_auditor_agent(telegram_id: int) -> Agent:
 
     agent = Agent(
         model=Gemini(
-            id="gemini-3.1-flash-lite-preview",
+            id="gemini-2.0-flash-lite",  # актуальная модель (2.0 Flash Lite)
             api_key=api_key,
         ),
         description=(
