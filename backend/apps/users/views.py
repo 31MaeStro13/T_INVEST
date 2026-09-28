@@ -1,13 +1,16 @@
 import logging
 
+from django.core.cache import cache
 from portfolio.tasks import sync_user_portfolio
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import BrokerToken, InvestorUser
+from .security import mask_identifier
 from .serializers import (
     BrokerTokenSerializer,
+    DeleteAccountSerializer,
     SetTokenSerializer,
     TriggerSyncSerializer,
 )
@@ -15,23 +18,28 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+
 class UserStatusView(APIView):
-    """GET /api/v1/users/status/?telegram_id=... — проверка статуса пользователя."""
+    """GET /api/v1/users/status/?telegram_id=... или ?user_hash=... — проверка статуса пользователя."""
 
     def get(self, request):
+        user_hash = request.query_params.get("user_hash")
         tg_id = request.query_params.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
+        identifier = user_hash or tg_id
+
+        if not identifier:
             return Response(
-                {"detail": "Некорректный или отсутствующий telegram_id"},
+                {"detail": "Некорректный или отсутствующий identifier (telegram_id или user_hash)"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response(
                 {
                     "exists": False,
                     "has_token": False,
+                    "user_hash": None,
                     "user_type": "retail",
                     "user_type_display": "Частный инвестор",
                     "accounts_count": 0,
@@ -52,6 +60,7 @@ class UserStatusView(APIView):
             {
                 "exists": True,
                 "has_token": has_token,
+                "user_hash": user.user_hash,
                 "user_type": user.user_type,
                 "user_type_display": user.get_user_type_display(),
                 "accounts_count": user.accounts.count(),
@@ -70,16 +79,16 @@ class SetUserTypeView(APIView):
     """POST /api/v1/users/set_type/ — переключение роли инвестора (retail / pro)."""
 
     def post(self, request):
-        tg_id = request.data.get("telegram_id")
+        identifier = request.data.get("user_hash") or request.data.get("telegram_id")
         user_type = request.data.get("user_type")
 
-        if not tg_id:
+        if not identifier:
             return Response(
-                {"detail": "Параметр telegram_id обязателен"},
+                {"detail": "Параметр telegram_id или user_hash обязателен"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = InvestorUser.objects.filter(telegram_id=tg_id).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response(
                 {"detail": "Пользователь не найден"},
@@ -103,12 +112,13 @@ class SetUserTypeView(APIView):
             )
 
         user.save(update_fields=["user_type"])
-        logger.info(f"Пользователь {user.telegram_id} сменил роль на {user.user_type}")
+        logger.info(f"Инвестор {user.user_hash[:8] if user.user_hash else user.telegram_id} сменил роль на {user.user_type}")
 
         return Response(
             {
                 "status": "ok",
                 "telegram_id": user.telegram_id,
+                "user_hash": user.user_hash,
                 "user_type": user.user_type,
                 "user_type_display": user.get_user_type_display(),
             },
@@ -120,14 +130,14 @@ class ToggleAlertsView(APIView):
     """POST /api/v1/users/toggle_alerts/ — переключение статуса риск-алертов."""
 
     def post(self, request):
-        tg_id = request.data.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
+        identifier = request.data.get("user_hash") or request.data.get("telegram_id")
+        if not identifier:
             return Response(
-                {"detail": "telegram_id обязателен и должен быть числом"},
+                {"detail": "telegram_id или user_hash обязателен"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response({"detail": "Пользователь не найден"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -138,6 +148,7 @@ class ToggleAlertsView(APIView):
             {"alerts_enabled": user.alerts_enabled},
             status=status.HTTP_200_OK,
         )
+
 
 
 class SetUserTokenView(APIView):
@@ -188,16 +199,16 @@ class SetUserTokenView(APIView):
 
 class TokensListView(APIView):
     """
-    GET /api/v1/tokens/?telegram_id=... — список токенов пользователя
+    GET /api/v1/tokens/?telegram_id=... или ?user_hash=... — список токенов пользователя
     POST /api/v1/tokens/ — добавление нового токена
     """
 
     def get(self, request):
-        tg_id = request.query_params.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
-            return Response({"detail": "telegram_id обязателен"}, status=status.HTTP_400_BAD_REQUEST)
+        identifier = request.query_params.get("user_hash") or request.query_params.get("telegram_id")
+        if not identifier:
+            return Response({"detail": "telegram_id или user_hash обязателен"}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response([], status=status.HTTP_200_OK)
 
@@ -213,11 +224,11 @@ class ActivateTokenView(APIView):
     """POST /api/v1/tokens/<int:token_id>/activate/ — сделать токен активным."""
 
     def post(self, request, token_id: int):
-        tg_id = request.data.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
-            return Response({"detail": "telegram_id обязателен"}, status=status.HTTP_400_BAD_REQUEST)
+        identifier = request.data.get("user_hash") or request.data.get("telegram_id")
+        if not identifier:
+            return Response({"detail": "telegram_id или user_hash обязателен"}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response({"detail": "Пользователь не найден"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -255,8 +266,11 @@ class TriggerSyncView(APIView):
         serializer = TriggerSyncSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        tg_id = serializer.validated_data["telegram_id"]
-        user = InvestorUser.objects.filter(telegram_id=tg_id).first()
+        tg_id = serializer.validated_data.get("telegram_id")
+        user_hash = serializer.validated_data.get("user_hash")
+        identifier = user_hash or tg_id
+
+        user = InvestorUser.get_by_id_or_hash(identifier)
 
         if not user or (not user.encrypted_token and not user.broker_tokens.exists()):
             return Response(
@@ -271,3 +285,69 @@ class TriggerSyncView(APIView):
             {"status": "ok", "message": "Синхронизация успешно поставлена в очередь."},
             status=status.HTTP_200_OK,
         )
+
+
+class DeleteAccountView(APIView):
+    """
+    POST / DELETE /api/v1/users/delete_account/
+    Право на забвение (152-ФЗ / GDPR Article 17 Right to be Forgotten).
+    Безвозвратно удаляет пользователя, все токены, счета, снимки, позиции и кэш Redis.
+    """
+
+    def _delete_user_data(self, identifier):
+        if not identifier:
+            return Response(
+                {"detail": "Параметр telegram_id или user_hash обязателен"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = InvestorUser.get_by_id_or_hash(identifier)
+        if not user:
+            return Response({"detail": "Пользователь не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        user_id = user.id
+        user_hash = user.user_hash or ""
+        account_ids = list(user.accounts.values_list("id", flat=True))
+
+        # Очистка кэша Redis для пользователя и его счетов
+        cache.delete(f"chart:consolidated:{user_id}")
+        cache.delete(f"snapshot:consolidated:{user_id}:all")
+        for acc_id in account_ids:
+            cache.delete(f"chart:account:{acc_id}")
+            for d in (30, 90, 180, 365):
+                cache.delete(f"analytics:account:{acc_id}:{d}")
+
+        for d in (30, 90, 180, 365):
+            cache.delete(f"analytics:consolidated:{user_id}:all:{d}")
+            if user.active_broker_token:
+                cache.delete(f"analytics:consolidated:{user_id}:{user.active_broker_token.id}:{d}")
+                cache.delete(f"snapshot:consolidated:{user_id}:{user.active_broker_token.id}")
+
+        # Каскадное удаление инвестора (tokens, accounts, snapshots, positions)
+        user.delete()
+        masked = mask_identifier(user_hash or identifier)
+        logger.info(f"Инвестор {masked} удалил аккаунт (Право на забвение 152-ФЗ / GDPR)")
+
+        return Response(
+            {
+                "status": "ok",
+                "message": "Все данные пользователя, токены, счета и история успешно и безвозвратно удалены.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        serializer = DeleteAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data.get("user_hash") or serializer.validated_data.get("telegram_id")
+        return self._delete_user_data(identifier)
+
+    def delete(self, request):
+        identifier = (
+            request.data.get("user_hash")
+            or request.data.get("telegram_id")
+            or request.query_params.get("user_hash")
+            or request.query_params.get("telegram_id")
+        )
+        return self._delete_user_data(identifier)
+

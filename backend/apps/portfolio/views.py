@@ -1,6 +1,8 @@
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from users.models import InvestorUser
 
 from .models import Account
@@ -50,11 +52,11 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"])
     def consolidated_snapshot(self, request):
         """Возвращает агрегированный снимок по всем счетам пользователя."""
-        tg_id = request.query_params.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
-            return Response({"detail": "telegram_id обязателен"}, status=400)
+        identifier = request.query_params.get("user_hash") or request.query_params.get("telegram_id")
+        if not identifier:
+            return Response({"detail": "telegram_id или user_hash обязателен"}, status=400)
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response({"detail": "Пользователь не найден"}, status=404)
 
@@ -68,11 +70,16 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["post"])
     def activate_consolidated(self, request):
         """Активирует режим 'Все счета' (сбрасывает активный счет в None)."""
-        tg_id = request.data.get("telegram_id")
-        if not tg_id or not str(tg_id).isdigit():
-            return Response({"detail": "telegram_id обязателен"}, status=400)
+        identifier = (
+            request.data.get("user_hash")
+            or request.data.get("telegram_id")
+            or request.query_params.get("user_hash")
+            or request.query_params.get("telegram_id")
+        )
+        if not identifier:
+            return Response({"detail": "telegram_id или user_hash обязателен"}, status=400)
 
-        user = InvestorUser.objects.filter(telegram_id=int(tg_id)).first()
+        user = InvestorUser.get_by_id_or_hash(identifier)
         if not user:
             return Response({"detail": "Пользователь не найден"}, status=404)
 
@@ -83,4 +90,47 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
             "active_account_id": None,
             "account_name": "Все счета Т-Банка",
         })
+
+
+class UploadReportView(APIView):
+    """
+    POST /api/v1/portfolio/upload_report/
+    In-Memory анализ брокерского отчета Excel (.xlsx) без сохранения на диск и в БД.
+    """
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"detail": "Файл отчета не прикреплен. Загрузите файл с полем 'file'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not file_obj.name.lower().endswith(".xlsx"):
+            return Response(
+                {"detail": "Поддерживаются только отчеты в формате Excel (.xlsx)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if file_obj.size > 10 * 1024 * 1024:
+            return Response(
+                {"detail": "Размер файла превышает лимит 10 МБ."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from .excel_parser import parse_broker_report_xlsx
+
+            report_data = parse_broker_report_xlsx(file_obj.read())
+            return Response(report_data, status=status.HTTP_200_OK)
+        except ValueError as err:
+            return Response({"detail": str(err)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response(
+                {"detail": f"Ошибка обработки файла: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
 

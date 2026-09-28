@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Any
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ class BackendAPIClient:
 
     async def get_chart(self, account_id: int | str, telegram_id: int) -> bytes | None:
         """Скачивает бинарные байты PNG-дашборда из бэкенда."""
-        
+
         if str(account_id).lower() == "consolidated":
             url = f"{self.base_url}/api/v1/analytics/consolidated/chart/"
             params = {"telegram_id": telegram_id}
@@ -200,13 +201,13 @@ class BackendAPIClient:
             url = f"{self.base_url}/api/v1/analytics/{account_id}/chart/"
             params = {}
 
-        try: 
+        try:
             async with self.session.get(
                 url, params=params, timeout=aiohttp.ClientTimeout(total=10)
             ) as response:
                 if response.status == 200:
                     return await response.read()
-                return None 
+                return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             logger.error(f"Сбой загрузки графика (get_chart): {exc}")
             return None
@@ -245,5 +246,48 @@ class BackendAPIClient:
         except aiohttp.ClientError as exc:
             logger.error(f"Сбой подключения к бэкенду (ask_ai_auditor): {exc}")
             return "⚠️ Ошибка связи с сервером AI-аналитики."
+
+    async def delete_account(self, telegram_id: int) -> bool:
+        """Право на забвение (152-ФЗ / GDPR): безвозвратно удаляет все данные инвестора."""
+
+        url = f"{self.base_url}/api/v1/users/delete_account/"
+        payload = {"telegram_id": telegram_id}
+        try:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    logger.info(f"Аккаунт telegram_id={telegram_id} успешно удален из бэкенда.")
+                    return True
+                logger.warning(f"Ошибка удаления аккаунта: status {response.status}")
+                return False
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (delete_account): {exc}")
+            return False
+
+    async def upload_broker_report(
+        self, file_bytes: bytes, filename: str = "report.xlsx"
+    ) -> dict[str, Any] | None:
+        """In-Memory отправка файла брокерского отчета для экспресс-аудита без сохранения токена."""
+        url = f"{self.base_url}/api/v1/portfolio/upload_report/"
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            file_bytes,
+            filename=filename,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        try:
+            async with self.session.post(
+                url, data=data, timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                logger.warning(f"Ошибка парсинга отчета: status {response.status}")
+                return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error(f"Сбой подключения к бэкенду (upload_broker_report): {exc}")
+            return None
+
 
 

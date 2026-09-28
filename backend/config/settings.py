@@ -20,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / 'apps'))
 load_dotenv(BASE_DIR.parent / ".env")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+USER_HASH_SALT = os.getenv("USER_HASH_SALT", "t_invest_zero_knowledge_salt_2026")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
@@ -141,3 +142,21 @@ MAILERS = {
 # Celery settings
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+
+# Cache settings (Redis in production / LocMem in CI and unit tests)
+REDIS_CACHE_URL = os.getenv("REDIS_CACHE_URL")
+if REDIS_CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_CACHE_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "t-invest-cache",
+        }
+    }
+

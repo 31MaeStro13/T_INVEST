@@ -2,29 +2,29 @@ import logging
 import os
 from dataclasses import dataclass
 
-from environs import Env 
+from environs import Env
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class BotSettings:
-    token: str 
+    token: str
     admin_ids: list[int]
 
 @dataclass
 class LoggSettings:
-    level: str 
-    format: str 
+    level: str
+    format: str
 
 @dataclass
 class TBank:
-    token: str 
+    token: str
 
 @dataclass
 class Security:
-    token: str 
+    token: str
 
-@dataclass 
+@dataclass
 class Config:
     bot: BotSettings
     log: LoggSettings
@@ -32,10 +32,10 @@ class Config:
     sec: Security
 
 def load_config(path: str | None = None) -> Config:
-    
+
     env = Env()
 
-    if path: 
+    if path:
         if not os.path.exists(path):
             logger.warning(".env file not found at '%s', skipping...", path)
         else:
@@ -55,7 +55,7 @@ def load_config(path: str | None = None) -> Config:
     try:
         admin_ids = [int(x) for x in raw_ids]
     except ValueError as e:
-        raise ValueError(f"ADMIN_IDS must be integers, got: {raw_ids}") from e 
+        raise ValueError(f"ADMIN_IDS must be integers, got: {raw_ids}") from e
 
     tbank_token = env("T_BANK_READ_ONLY_INVEST_TOKEN")
 

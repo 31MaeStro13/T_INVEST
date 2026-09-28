@@ -27,9 +27,26 @@ class SetTokenSerializer(serializers.Serializer):
 
 
 class TriggerSyncSerializer(serializers.Serializer):
-    telegram_id = serializers.IntegerField(required=True)
+    telegram_id = serializers.IntegerField(required=False, allow_null=True)
+    user_hash = serializers.CharField(required=False, max_length=64, allow_null=True)
+
+    def validate(self, attrs):
+        if not attrs.get("telegram_id") and not attrs.get("user_hash"):
+            raise serializers.ValidationError("Укажите telegram_id или user_hash.")
+        return attrs
+
+
+class DeleteAccountSerializer(serializers.Serializer):
+    telegram_id = serializers.IntegerField(required=False, allow_null=True)
+    user_hash = serializers.CharField(required=False, max_length=64, allow_null=True)
+
+    def validate(self, attrs):
+        if not attrs.get("telegram_id") and not attrs.get("user_hash"):
+            raise serializers.ValidationError("Укажите telegram_id или user_hash.")
+        return attrs
 
 
 class SetActiveAccountSerializer(serializers.Serializer):
     telegram_id = serializers.IntegerField(required=True)
     account_id = serializers.IntegerField(required=True)
+

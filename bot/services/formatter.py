@@ -1,4 +1,3 @@
-from decimal import Decimal
 from typing import Any
 
 from bot.lexicon.lexicon_ru import LEXICON_RU
@@ -28,7 +27,7 @@ def format_yield(val: Any) -> str:
         elif num < 0:
             return f"🔴 -{formatted} ₽"
         else:
-            return f"⚪️ 0.00 ₽"
+            return "⚪️ 0.00 ₽"
     except (ValueError, TypeError):
         return f"{val} ₽"
 
@@ -159,6 +158,8 @@ def build_risk_audit_text(account: dict, snapshot: dict) -> str:
     shares_ratio = (shares / total) * 100.0
     bonds_ratio = (bonds / total) * 100.0
 
+    lines.append(f"• Акции: {shares_ratio:.1f}% | Облигации: {bonds_ratio:.1f}% | Валюта: {cash_ratio:.1f}%")
+
     if cash_ratio > 80.0:
         lines.append(f"🔴 <b>Критическая доля кэша: {cash_ratio:.1f}%</b>. Средства не защищены от инфляции.")
     elif cash_ratio > 30.0:
@@ -182,7 +183,7 @@ def build_risk_audit_text(account: dict, snapshot: dict) -> str:
     else:
         lines.append("🟢 Критической концентрации в отдельных бумагах не обнаружено.")
 
-    lines.append(f"\n<b>3. Итоговый статус риска:</b>")
+    lines.append("\n<b>3. Итоговый статус риска:</b>")
     if cash_ratio > 80.0 or high_concentration:
         lines.append("⚠️ <b>Требуется балансировка</b>.")
     else:

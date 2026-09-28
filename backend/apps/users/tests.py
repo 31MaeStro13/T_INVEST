@@ -89,3 +89,75 @@ class UserApiTests(TestCase):
         self.assertEqual(res2.data["user_type"], "retail")
         user.refresh_from_db()
         self.assertEqual(user.user_type, "retail")
+
+    def test_user_hash_generation_and_lookup(self):
+        """Проверка генерации Zero-Knowledge user_hash и поиска get_by_id_or_hash."""
+        user = InvestorUser.objects.create(telegram_id=777888999)
+        self.assertIsNotNone(user.user_hash)
+        self.assertEqual(len(user.user_hash), 64)
+
+        # Поиск по raw telegram_id
+        found_by_tg = InvestorUser.get_by_id_or_hash(777888999)
+        self.assertEqual(found_by_tg, user)
+
+        # Поиск по 64-символьному user_hash
+        found_by_hash = InvestorUser.get_by_id_or_hash(user.user_hash)
+        self.assertEqual(found_by_hash, user)
+
+    def test_user_status_by_user_hash(self):
+        """Проверка получения статуса по user_hash."""
+        user = InvestorUser.objects.create(telegram_id=333444555)
+        response = self.client.get(f"/api/v1/users/status/?user_hash={user.user_hash}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["exists"])
+        self.assertEqual(response.data["user_hash"], user.user_hash)
+
+    def test_delete_account_gdpr_cascading(self):
+        """Проверка каскадного удаления всех данных инвестора (152-ФЗ / GDPR)."""
+        from portfolio.models import Account, PortfolioSnapshot, Position
+
+        user = InvestorUser.objects.create(telegram_id=444555666)
+        token = BrokerToken.objects.create(user=user, name="Удаляемый токен")
+        token.set_token("t.delete_me")
+        token.save()
+
+        account = Account.objects.create(investor=user, broker_token=token, account_id="acc_del_1", name="Счет")
+        snap = PortfolioSnapshot.objects.create(account=account, total_amount_portfolio=100000)
+        pos = Position.objects.create(
+            snapshot=snap,
+            figi="BBG000B9XRY4",
+            ticker="AAPL",
+            instrument_type="share",
+            quantity=10,
+            current_price=150.0,
+            expected_yield=20.0,
+        )
+
+        # Удаляем аккаунт через API
+
+
+        response = self.client.post("/api/v1/users/delete_account/", {"telegram_id": 444555666}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "ok")
+
+        # Проверяем каскадное удаление всех связанных сущностей
+        self.assertFalse(InvestorUser.objects.filter(id=user.id).exists())
+        self.assertFalse(BrokerToken.objects.filter(id=token.id).exists())
+        self.assertFalse(Account.objects.filter(id=account.id).exists())
+        self.assertFalse(PortfolioSnapshot.objects.filter(id=snap.id).exists())
+        self.assertFalse(Position.objects.filter(id=pos.id).exists())
+
+    def test_delete_account_by_user_hash(self):
+        """Проверка удаления аккаунта по Zero-Knowledge user_hash."""
+        user = InvestorUser.objects.create(telegram_id=888999111)
+        u_hash = user.user_hash
+
+        response = self.client.delete(f"/api/v1/users/delete_account/?user_hash={u_hash}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(InvestorUser.objects.filter(telegram_id=888999111).exists())
+
+    def test_delete_account_not_found(self):
+        """Проверка попытки удаления несуществующего аккаунта."""
+        response = self.client.post("/api/v1/users/delete_account/", {"telegram_id": 999999999}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+

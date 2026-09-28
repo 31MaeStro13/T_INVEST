@@ -91,6 +91,9 @@ def get_accounts_keyboard(accounts: list[dict], is_consolidated_active: bool = F
         ])
 
     buttons.append([
+        InlineKeyboardButton(text="📄 Загрузить отчет Excel (.xlsx)", callback_data="report:upload"),
+    ])
+    buttons.append([
         InlineKeyboardButton(text="🔑 Мои токены Т-Банка", callback_data="tokens:menu")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -118,9 +121,42 @@ def get_tokens_keyboard(tokens: list[dict]) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="➕ Добавить новый токен", callback_data="token:add"),
     ])
     buttons.append([
+        InlineKeyboardButton(text="🗑 Удалить все данные (152-ФЗ)", callback_data="account:ask_delete"),
+    ])
+    buttons.append([
         InlineKeyboardButton(text="🔙 К выбору счетов", callback_data="portfolio:accounts"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_delete_account_confirmation_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления всех данных (Право на забвение 152-ФЗ / GDPR)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💥 Да, удалить всё безвозвратно",
+                    callback_data="account:confirm_delete",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена (сохранить данные)",
+                    callback_data="tokens:menu",
+                )
+            ],
+        ]
+    )
+
+
+def get_cancel_upload_report_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка отмены загрузки брокерского отчета."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="report:cancel")]
+        ]
+    )
+
 
 
 def get_positions_pagination_keyboard(

@@ -1,4 +1,5 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
 from bot.lexicon.lexicon_ru import LEXICON_RU
 
 

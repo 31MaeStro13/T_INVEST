@@ -1,28 +1,30 @@
 import asyncio
+import io
 import logging
-from aiogram import F, Router
+
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
-
 
 from bot.keyboards.inline_keyboards import (
     get_accounts_keyboard,
     get_ai_cancel_keyboard,
     get_back_to_portfolio_keyboard,
+    get_cancel_upload_report_keyboard,
+    get_delete_account_confirmation_keyboard,
     get_portfolio_keyboard,
     get_positions_pagination_keyboard,
     get_tokens_keyboard,
 )
-from bot.states.ai_states import AIAuditorState
-
 from bot.lexicon.lexicon_ru import LEXICON_RU
 from bot.services.api_client import BackendAPIClient
 from bot.services.formatter import (
+    build_analytics_text,
     build_portfolio_text,
     build_positions_text,
-    build_risk_audit_text,
-    build_analytics_text,
 )
+from bot.states.ai_states import AIAuditorState
+from bot.states.report_states import ReportUploadState
 
 logger = logging.getLogger(__name__)
 router = Router(name="portfolio_router")
@@ -279,7 +281,7 @@ async def cb_audit_portfolio(callback: CallbackQuery, api_client: BackendAPIClie
 
     if data is None:
         await callback.message.edit_text(
-            text=LEXICON_RU["backend_error"], 
+            text=LEXICON_RU["backend_error"],
             reply_markup=get_back_to_portfolio_keyboard(account_id=acc_id_raw),
             parse_mode="HTML",
         )
@@ -474,7 +476,145 @@ async def msg_ask_ai_process(message: Message, state: FSMContext, api_client: Ba
     except Exception:
         await message.answer(text=full_text, reply_markup=kb, parse_mode=None)
 
-
     await state.clear()
+
+
+
+@router.callback_query(F.data == "account:ask_delete")
+async def cb_ask_delete_account(callback: CallbackQuery):
+    """Предупреждение перед полным удалением аккаунта (152-ФЗ / GDPR)."""
+    text = (
+        "⚠️ <b>ВНИМАНИЕ! Безвозвратное удаление данных (152-ФЗ / GDPR)</b>\n\n"
+        "Вы запрашиваете полное удаление своего профиля:\n"
+        "• Все зашифрованные токены Т-Банка будут стерты.\n"
+        "• Все брокерские счета, позиции и история снимков будут удалены.\n"
+        "• Кэш аналитики и графиков будет очищен.\n"
+        "• Zero-Knowledge идентификатор будет аннулирован.\n\n"
+        "<b>Это действие необратимо.</b> Вы уверены?"
+    )
+    await callback.message.edit_text(
+        text=text,
+        reply_markup=get_delete_account_confirmation_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "account:confirm_delete")
+async def cb_confirm_delete_account(callback: CallbackQuery, api_client: BackendAPIClient):
+    """Подтвержденное удаление аккаунта."""
+    ok = await api_client.delete_account(telegram_id=callback.from_user.id)
+    if ok:
+        await callback.message.edit_text(
+            text=(
+                "✅ <b>Ваши данные успешно удалены</b>\n\n"
+                "В соответствии с 152-ФЗ и GDPR Right to be Forgotten все ваши брокерские токены, "
+                "история портфелей и кэш безвозвратно стерты.\n\n"
+                "Чтобы начать заново, отправьте команду /start."
+            ),
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.edit_text(
+            text="⚠️ Не удалось удалить данные или аккаунт уже был удален. Попробуйте снова или обратитесь в поддержку.",
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "report:upload")
+async def cb_report_upload_start(callback: CallbackQuery, state: FSMContext):
+    """Запуск загрузки брокерского отчета Excel."""
+    await state.set_state(ReportUploadState.waiting_for_file)
+    text = (
+        "📄 <b>Экспресс-анализ брокерского отчета (.xlsx)</b>\n\n"
+        "Вы можете получить полный аудит портфеля <b>без привязки токена</b>!\n\n"
+        "🛡 <b>Принцип Zero-Disk:</b>\n"
+        "• Файл обрабатывается исключительно в оперативной памяти (RAM).\n"
+        "• Ни байта не записывается на диск или в базу данных.\n"
+        "• Номера счетов и персональные данные не сохраняются.\n\n"
+        "📎 <b>Отправьте файл отчета (.xlsx) в ответ на это сообщение:</b>"
+    )
+    await callback.message.answer(
+        text=text,
+        reply_markup=get_cancel_upload_report_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "report:cancel")
+async def cb_report_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отмена загрузки отчета."""
+    await state.clear()
+    await callback.answer("Загрузка отчета отменена")
+    await callback.message.edit_text("❌ Загрузка брокерского отчета отменена.", parse_mode="HTML")
+
+
+@router.message(ReportUploadState.waiting_for_file, F.document)
+async def process_report_file(
+    message: Message, state: FSMContext, api_client: BackendAPIClient, bot: Bot
+):
+    """Прием и In-Memory анализ файла отчета."""
+    doc = message.document
+    filename = doc.file_name or "report.xlsx"
+
+    if not filename.lower().endswith(".xlsx"):
+        await message.answer(
+            "⚠️ Пожалуйста, отправьте файл в формате Excel (.xlsx). Другие форматы пока не поддерживаются.",
+            reply_markup=get_cancel_upload_report_keyboard(),
+        )
+        return
+
+    wait_msg = await message.answer(
+        "⏳ <i>Читаю отчет в оперативной памяти (RAM) и рассчитываю метрики концентрации и риска...</i>",
+        parse_mode="HTML",
+    )
+
+    try:
+        file_io = io.BytesIO()
+        await bot.download(doc, destination=file_io)
+        file_bytes = file_io.getvalue()
+
+        data = await api_client.upload_broker_report(file_bytes=file_bytes, filename=filename)
+        await state.clear()
+
+        if not data or data.get("status") != "success":
+            detail = data.get("detail", "Не удалось распознать формат таблицы.") if data else "Ошибка связи с сервером."
+            await wait_msg.edit_text(f"❌ Ошибка анализа отчета: {detail}", parse_mode="HTML")
+            return
+
+        total = data.get("total_amount_portfolio", 0)
+        pos_cnt = data.get("positions_count", 0)
+        risk = data.get("risk_metrics", {})
+        hhi = risk.get("hhi_index", 0)
+        risk_label = risk.get("concentration_label", "")
+        top_share = risk.get("top_asset_share_pct", 0)
+        breakdown = data.get("asset_percentages", {})
+
+        report_text = (
+            f"📊 <b>Результаты экспресс-аудита отчета</b>\n"
+            f"📁 <i>Файл: {filename} (Zero-Disk RAM)</i>\n\n"
+            f"💰 <b>Стоимость портфеля:</b> {total:,.2f} ₽\n"
+            f"📦 <b>Всего позиций:</b> {pos_cnt} шт.\n\n"
+            f"<b>Структура активов:</b>\n"
+            f"• Акции: {breakdown.get('shares', 0)}%\n"
+            f"• Облигации: {breakdown.get('bonds', 0)}%\n"
+            f"• Фонды (ETF): {breakdown.get('etf', 0)}%\n"
+            f"• Валюта: {breakdown.get('currencies', 0)}%\n\n"
+            f"<b>Оценка диверсификации:</b>\n"
+            f"• Индекс Герфиндаля-Хиршмана (HHI): <b>{hhi}</b>\n"
+            f"• Статус риска: <b>{risk_label}</b>\n"
+            f"• Крупнейшая позиция: <b>{top_share}%</b> портфеля\n\n"
+            f"🔒 <i>Файл удален из оперативной памяти сразу после обработки. Ваши токены и ключи не требовались.</i>"
+        )
+        await wait_msg.edit_text(report_text, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.error(f"Сбой загрузки отчета: {exc}")
+        await state.clear()
+        await wait_msg.edit_text("❌ Произошла ошибка при обработке файла отчета.", parse_mode="HTML")
+
 
 
